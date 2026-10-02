@@ -1,0 +1,117 @@
+/* ===== Landing page motion ===== */
+
+/* Hero: nodes drift slowly out of phase */
+@keyframes vy-drift {
+  from {
+    transform: translate(0, 0);
+  }
+  to {
+    transform: translate(var(--dx, 12px), var(--dy, -10px));
+  }
+}
+.vy-node {
+  animation: vy-drift var(--dur, 9s) ease-in-out infinite alternate;
+  animation-delay: var(--dly, 0s);
+}
+
+/* Hero: edges link and unlink */
+@keyframes vy-link {
+  0%,
+  100% {
+    opacity: 0.04;
+  }
+  42% {
+    opacity: 0.5;
+  }
+  62% {
+    opacity: 0.34;
+  }
+}
+.vy-edge {
+  animation: vy-link var(--dur, 7s) ease-in-out infinite;
+  animation-delay: var(--dly, 0s);
+}
+
+@keyframes vy-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.45);
+    opacity: 0.4;
+  }
+}
+.vy-breathe {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vy-breathe 3s ease-in-out infinite;
+  animation-delay: var(--dly, 0s);
+}
+
+/* Section 3: scattered dots magnetically snap into a graph, then release */
+@keyframes vy-magnet {
+  0%,
+  14% {
+    transform: translate(var(--sx, 0px), var(--sy, 0px));
+  }
+  46%,
+  80% {
+    transform: translate(0, 0);
+  }
+  100% {
+    transform: translate(var(--sx, 0px), var(--sy, 0px));
+  }
+}
+.vy-dot {
+  animation: vy-magnet 5.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  animation-delay: var(--dly, 0s);
+}
+@keyframes vy-snap-edge {
+  0%,
+  32% {
+    opacity: 0;
+  }
+  50%,
+  82% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.vy-snap-edge {
+  animation: vy-snap-edge 5.4s ease-in-out infinite;
+  animation-delay: var(--dly, 0s);
+}
+
+/* Pipeline: packets flow along the connectors */
+@keyframes vy-flow {
+  0% {
+    left: -6%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    left: 104%;
+    opacity: 0;
+  }
+}
+.vy-flow-dot {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22d3ee, #a78bfa);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.85);
+  animation: vy-flow 2.6s linear infinite;
+  animation-delay: var(--dly, 0s);
+}
