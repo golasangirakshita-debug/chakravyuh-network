@@ -41,7 +41,7 @@ const LineSidebar = ({
   itemGap = 20,
   fontSize = 1.1,
   smoothing = 100,
-  defaultActive = null,
+  defaultActive = /** @type {number | null} */ (null),
   onItemClick,
   className = ''
 }) => {

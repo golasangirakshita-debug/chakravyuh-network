@@ -210,7 +210,7 @@ function ConsoleSidebar({
           <LineSidebar
             key={location.pathname}
             items={NAV_ITEMS.map(i => i.label)}
-            defaultActive={activeIndex}
+            defaultActive={activeIndex ?? 0}
             onItemClick={go}
             accentColor="#B84DFF"
             textColor="#C4C4C4"

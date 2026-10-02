@@ -132,8 +132,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   );
 
   const [step, setStep] = useState<Step>("credentials");
-  const [badge, setBadge] = useState(INVESTIGATOR.badge);
-  const [pass, setPass] = useState(INVESTIGATOR.pass);
+  const [badge, setBadge] = useState<string>(INVESTIGATOR.badge);
+  const [pass, setPass] = useState<string>(INVESTIGATOR.pass);
   const [otp, setOtp] = useState("");
   const [shown, setShown] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -215,8 +215,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               Investigator Intelligence Platform
             </p>
             <h1 className="mt-4 font-display text-4xl font-bold leading-tight text-white">
-              Four FIRs. Four states.
-              <br />
               <span className="text-gradient">One hidden network.</span>
             </h1>
             <p className="mt-4 text-sm leading-6 text-white/55">

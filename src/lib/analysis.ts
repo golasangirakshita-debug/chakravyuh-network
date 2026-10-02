@@ -15,6 +15,7 @@ import {
   TIMELINE_END,
   TIMELINE_START,
   type CaseDef,
+  type EntityDef,
   type GraphEdge,
   type GraphNode,
   type NetworkId,
@@ -72,15 +73,14 @@ export function signalsFor(entityIds: string[], cases: CaseDef[] = CASES): Signa
   const seen = new Set<string>();
   const uniq = involved.filter(c => (seen.has(c.id) ? false : (seen.add(c.id), true)));
 
-  const phone = entityIds
-    .map(id => ENTITY_BY_ID[id])
-    .find(e => e?.type === "phone" && entityCases(id, cases).length > 1);
-  const bank = entityIds
-    .map(id => ENTITY_BY_ID[id])
-    .find(e => (e?.type === "bank" || e?.type === "upi") && entityCases(id, cases).length > 1);
-  const alias = entityIds
-    .map(id => ENTITY_BY_ID[id])
-    .find(e => e?.type === "alias" && entityCases(id, cases).length > 1);
+  const firstOfType = (types: EntityDef["type"][]) =>
+    entityIds
+      .map(id => ENTITY_BY_ID[id])
+      .find(e => e && types.includes(e.type) && entityCases(e.id, cases).length > 1);
+
+  const phone = firstOfType(["phone"]);
+  const bank = firstOfType(["bank", "upi"]);
+  const alias = firstOfType(["alias"]);
 
   const stateSet = new Set(uniq.map(c => c.state));
   const geoHit = stateSet.size > 1;

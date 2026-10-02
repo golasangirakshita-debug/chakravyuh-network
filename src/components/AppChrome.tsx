@@ -67,7 +67,7 @@ export default function AppChrome() {
 
   return (
     <>
-      <IntroSplash />
+      <IntroSplash onDone={() => {}} />
       <TargetCursor
         spinDuration={2}
         hideDefaultCursor
@@ -88,6 +88,8 @@ export default function AppChrome() {
           pixelDuration={450}
           aspectRatio="auto"
           className="vyuh-pixelswap"
+          onActiveChange={() => {}}
+          onComplete={() => {}}
           style={{ height: "100vh", width: "100%" }}
         />
         <div className="grid-bg" style={{ position: "absolute", inset: 0, opacity: 0.6 }} />

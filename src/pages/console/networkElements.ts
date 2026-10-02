@@ -1,4 +1,4 @@
-import type { ElementDefinition, Stylesheet } from "cytoscape";
+import type { ElementDefinition, StylesheetJson } from "cytoscape";
 import type { GraphEdge, GraphNode, SourceType } from "@/lib/data";
 import { SOURCE_COLOR } from "@/lib/data";
 
@@ -66,7 +66,7 @@ export function buildElements(
   return els;
 }
 
-export const CY_STYLE: Stylesheet[] = [
+export const CY_STYLE: StylesheetJson = [
   {
     selector: "node",
     style: {

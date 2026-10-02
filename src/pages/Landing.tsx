@@ -211,9 +211,7 @@ function Hero() {
           transition={{ duration: 0.7, delay: 0.12 }}
           className="mt-6 max-w-4xl font-display text-5xl font-bold leading-[1.03] tracking-tight text-white sm:text-6xl lg:text-7xl"
         >
-          Four FIRs. Four states.
-          <br />
-          <span className="text-gradient">One hidden network.</span>
+          One <span className="text-gradient">hidden network.</span>
         </motion.h1>
 
         <motion.p
