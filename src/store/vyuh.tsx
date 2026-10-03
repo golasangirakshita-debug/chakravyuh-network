@@ -47,9 +47,6 @@ interface VyuhContextValue {
   startSession: (badge: string, name: string) => void;
   endSession: () => void;
 
-  pixelActive: boolean;
-  hitSidebar: (index: number) => void;
-
   cases: CaseDef[];
   extraEntities: EntityDef[];
   registerCase: (input: RegisterInput) => { caseDef: CaseDef; shared: SharedHit[] };
@@ -100,7 +97,6 @@ export function VyuhProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<VyuhSession | null>(() =>
     readJson<VyuhSession | null>(SESSION_KEY, null),
   );
-  const [pixelActive, setPixelActive] = useState(false);
   const [cases, setCases] = useState<CaseDef[]>(CASES);
   const [extraEntities, setExtraEntities] = useState<EntityDef[]>([]);
   const [highlightPhones, setHighlightPhones] = useState<string[] | null>(null);
@@ -124,10 +120,6 @@ export function VyuhProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
-  }, []);
-
-  const hitSidebar = useCallback((index: number) => {
-    setPixelActive(index % 2 === 1);
   }, []);
 
   const pushAudit = useCallback((line: AuditLine) => {
@@ -232,8 +224,6 @@ export function VyuhProvider({ children }: { children: ReactNode }) {
       session,
       startSession,
       endSession,
-      pixelActive,
-      hitSidebar,
       cases,
       extraEntities,
       registerCase,
@@ -248,8 +238,6 @@ export function VyuhProvider({ children }: { children: ReactNode }) {
       session,
       startSession,
       endSession,
-      pixelActive,
-      hitSidebar,
       cases,
       extraEntities,
       registerCase,

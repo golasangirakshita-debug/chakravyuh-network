@@ -465,9 +465,9 @@ export function ProfilePage() {
 /* ============================== Settings ============================== */
 
 export function SettingsPage() {
-  const { pixelActive, cases, audit, pushAudit, clearHighlight } = useVyuh();
+  const { cases, audit, pushAudit, clearHighlight } = useVyuh();
   const [toggles, setToggles] = useState([
-    { id: "pixels", label: "Signal-layer background", on: true, note: "Decorative ambient layer. Disable on low-power devices." },
+    { id: "waves", label: "LineWaves background", on: true, note: "Cursor-reactive WebGL wave layer. Disable on low-power devices." },
     { id: "autoNet", label: "Auto-attribute new entries", on: true, note: "Score a console-registered FIR and attach it to a network." },
     { id: "warn", label: "Warn before report generation", on: true, note: "Requires an explicit confirm on every draft." },
   ]);
@@ -558,7 +558,7 @@ export function SettingsPage() {
               <AlertTriangle className="h-3.5 w-3.5" /> CLEAR ACTIVE HIGHLIGHTS
             </button>
             <p className="mono text-[10px] text-white/30">
-              ambient layer: {pixelActive ? "animated" : "static"}
+              ambient layer: LineWaves (WebGL) · cursor-reactive
             </p>
           </div>
         </Panel>

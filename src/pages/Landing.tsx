@@ -264,18 +264,18 @@ function Hero() {
 /* ============================== 3. Chaos vs control ============================== */
 
 const LEFT_ROWS = [
-  "Scattered FIRs across districts",
-  "Siloed state databases",
-  "Manual cross-checks on paper",
-  "Weeks to spot the pattern",
-  "Evidence with no provenance",
+  "Every FIR read on its own merits",
+  "No record of who touched which exhibit",
+  "A shared number found by luck, not by query",
+  "Gaps indistinguishable from quiet",
+  "The bridge node sits unremarked in the file",
 ];
 const RIGHT_ROWS = [
-  "Shared entities linked automatically",
-  "Explainable score, not a verdict",
-  "Evidence sealed with a hash chain",
-  "Hours to the first cross-state lead",
-  "Every claim traceable to a source",
+  "Shared phone, alias and account resolved as one entity",
+  "Every view, query and freeze written to an audit log",
+  "Overlapping neighbourhoods found by structural analysis",
+  "A silence between clusters raised as a lead, not ignored",
+  "The one node whose removal splits the network, ranked first",
 ];
 
 const SNAP_NODES = [
@@ -359,8 +359,10 @@ function IsolationSection() {
             Stop investigating in isolation
           </h2>
           <p className="mt-4 text-white/55">
-            A ring that moves across states looks like four unrelated cases —
-            until the records are forced to talk to each other.
+            Most organised crime is invisible because the records that prove it
+            sit in different hands. Chakravyuh resolves shared identifiers
+            across states, ranks the evidence that matters, and shows the
+            structure holding it together.
           </p>
         </motion.div>
 
@@ -374,7 +376,7 @@ function IsolationSection() {
             className="space-y-3"
           >
             <p className="mono mb-4 text-[10px] tracking-[0.3em] text-white/35">
-              TODAY — IN ISOLATION
+              TODAY — CASE BY CASE
             </p>
             {LEFT_ROWS.map(row => (
               <div

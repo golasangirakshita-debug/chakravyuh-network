@@ -24,6 +24,35 @@ type TemplateId = (typeof TEMPLATES)[number]["id"];
 export default function ReportsPage() {
   const { cases, pushAudit } = useVyuh();
   const [template, setTemplate] = useState<TemplateId>("briefing");
+  const [building, setBuilding] = useState<string | null>(null);
+
+  // Simulated evidence-assembly pass so the draft does not appear instantly.
+  const STAGES = [
+    "SEALING EVIDENCE MANIFEST",
+    "VERIFYING HASH CHAIN",
+    "CROSS-REFERENCING ENTITIES",
+    "RENDERING BRIEF",
+  ];
+  const generate = () => {
+    if (building) return;
+    let i = 0;
+    setBuilding(STAGES[0]);
+    const id = window.setInterval(() => {
+      i += 1;
+      if (i >= STAGES.length) {
+        window.clearInterval(id);
+        setBuilding(null);
+        pushAudit({
+          ts: new Date().toISOString(),
+          actor: INVESTIGATOR.badge,
+          action: `report.generate ${template}`,
+          result: `${cases.length} cases · sealed`,
+        });
+        return;
+      }
+      setBuilding(STAGES[i]);
+    }, 420);
+  };
   const story = useMemo(() => flagStory(cases), [cases]);
   const holes = useMemo(() => structuralHoles(cases), [cases]);
   const bridges = useMemo(() => breachRanks(cases).slice(0, 3), [cases]);
@@ -96,17 +125,16 @@ export default function ReportsPage() {
               <Printer className="h-3.5 w-3.5" /> PRINT
             </button>
             <button
-              onClick={() =>
-                pushAudit({
-                  ts: new Date().toISOString(),
-                  actor: INVESTIGATOR.badge,
-                  action: `report.generate ${template}`,
-                  result: `${cases.length} cases · draft`,
-                })
-              }
-              className="mono flex items-center gap-2 rounded-lg bg-[#22D3EE] px-3 py-2 text-[10px] font-bold tracking-[0.18em] text-black transition hover:brightness-110"
+              onClick={generate}
+              disabled={!!building}
+              className="mono flex items-center gap-2 rounded-lg bg-[#22D3EE] px-3 py-2 text-[10px] font-bold tracking-[0.18em] text-black transition hover:brightness-110 disabled:opacity-60"
             >
-              <Download className="h-3.5 w-3.5" /> GENERATE
+              {building ? (
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-black/30 border-t-black" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              {building ?? "GENERATE"}
             </button>
           </>
         }
@@ -162,7 +190,22 @@ export default function ReportsPage() {
           key={template}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
+          className="relative"
         >
+          {building && (
+            <div className="absolute inset-0 z-10 grid place-items-center rounded-2xl bg-[#070910]/80 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-3">
+                <div className="relative h-10 w-10">
+                  <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-[#22D3EE]" />
+                  <span className="absolute inset-1.5 animate-pulse rounded-full border border-[#A78BFA]/40" />
+                </div>
+                <p className="mono text-[10px] tracking-[0.26em] text-[#22D3EE]">{building}</p>
+                <div className="h-0.5 w-40 overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full rounded-full bg-[#22D3EE] transition-all duration-300" style={{ width: `${((STAGES.indexOf(building) + 1) / STAGES.length) * 100}%` }} />
+                </div>
+              </div>
+            </div>
+          )}
           <Panel className="p-8 print:p-0 print:border-0 print:bg-white">
             <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
               <div>

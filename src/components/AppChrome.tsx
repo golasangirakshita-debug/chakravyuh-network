@@ -1,61 +1,25 @@
 import IntroSplash from "@/components/IntroSplash";
-import PixelSwap from "@/components/PixelSwap";
+import LineWaves from "@/components/LineWaves";
 import TargetCursor from "@/components/TargetCursor";
-import { useVyuh } from "@/store/vyuh";
-import type { CSSProperties } from "react";
-
-/** Scene A — deep navy drifting into violet. */
-const sceneA = (
-  <div
-    style={{
-      position: "absolute",
-      inset: 0,
-      background:
-        "radial-gradient(1300px 700px at 22% 18%, rgba(43, 61, 138, 0.55), transparent 62%), radial-gradient(900px 600px at 82% 78%, rgba(94, 58, 176, 0.4), transparent 65%), linear-gradient(155deg, #060711 0%, #090a18 48%, #120b22 100%)",
-    }}
-  >
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        opacity: 0.55,
-        backgroundImage:
-          "radial-gradient(rgba(126, 148, 255, 0.16) 1px, transparent 1px)",
-        backgroundSize: "28px 28px",
-      }}
-    />
-  </div>
-);
-
-/** Scene B — violet bleeding into a pink glow. */
-const sceneB = (
-  <div
-    style={{
-      position: "absolute",
-      inset: 0,
-      background:
-        "radial-gradient(1100px 700px at 74% 22%, rgba(184, 77, 255, 0.34), transparent 62%), radial-gradient(950px 650px at 26% 84%, rgba(255, 79, 163, 0.26), transparent 62%), linear-gradient(155deg, #14081e 0%, #0a0714 55%, #05060a 100%)",
-    }}
-  >
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        opacity: 0.5,
-        backgroundImage:
-          "radial-gradient(rgba(255, 168, 214, 0.14) 1px, transparent 1px)",
-        backgroundSize: "28px 28px",
-      }}
-    />
-  </div>
-);
+import { useEffect, useState, type CSSProperties } from "react";
 
 /**
- * Global chrome: one-shot intro splash, the custom target cursor and the
- * fixed PixelSwap background that flips scene whenever a sidebar item is hit.
+ * Global chrome: one-shot intro splash, the custom target cursor, and the
+ * fixed LineWaves background.
+ *
+ * The layer sits at z-index -1 and `body` is deliberately transparent
+ * (see index.css) so the WebGL canvas is actually visible — an opaque body
+ * background paints over negative z-index children and hid this entirely.
  */
 export default function AppChrome() {
-  const { pixelActive } = useVyuh();
+  const [waves, setWaves] = useState(false);
+
+  // The wave shader is fill-rate heavy; mount it one frame after paint so it
+  // never competes with first paint of the route content.
+  useEffect(() => {
+    const id = window.setTimeout(() => setWaves(true), 60);
+    return () => window.clearTimeout(id);
+  }, []);
 
   const bgLayer: CSSProperties = {
     position: "fixed",
@@ -63,6 +27,9 @@ export default function AppChrome() {
     zIndex: -1,
     pointerEvents: "none",
     overflow: "hidden",
+    // Vignette so foreground text keeps contrast over the brightest wave ridges.
+    background:
+      "radial-gradient(1200px 800px at 50% 40%, rgba(5,6,10,0.30), rgba(5,6,10,0.86) 78%)",
   };
 
   return (
@@ -76,23 +43,24 @@ export default function AppChrome() {
         cursorColorOnTarget="#ff4fa3"
       />
       <div aria-hidden style={bgLayer}>
-        <PixelSwap
-          firstContent={sceneA}
-          secondContent={sceneB}
-          trigger="manual"
-          active={pixelActive}
-          pixelSize={64}
-          pattern="spiral"
-          fade
-          duration={1400}
-          pixelDuration={450}
-          aspectRatio="auto"
-          className="vyuh-pixelswap"
-          onActiveChange={() => {}}
-          onComplete={() => {}}
-          style={{ height: "100vh", width: "100%" }}
-        />
-        <div className="grid-bg" style={{ position: "absolute", inset: 0, opacity: 0.6 }} />
+        {waves && (
+          <LineWaves
+            speed={0.22}
+            innerLineCount={22}
+            outerLineCount={30}
+            warpIntensity={1.15}
+            rotation={-52}
+            edgeFadeWidth={0.55}
+            colorCycleSpeed={0.75}
+            brightness={0.42}
+            color1="#22D3EE"
+            color2="#A78BFA"
+            color3="#B84DFF"
+            enableMouseInteraction
+            mouseInfluence={1.4}
+          />
+        )}
+        <div className="grid-bg" style={{ position: "absolute", inset: 0, opacity: 0.45 }} />
       </div>
     </>
   );

@@ -127,8 +127,23 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    /* Transparent so the fixed WebGL wave layer at z-index -1 stays visible. */
+    background: var(--background);
+  }
+  /* WebGL wave layer: muted under reduced-motion, and hidden entirely when the
+     canvas has no support so the page still reads correctly. */
+  @media (prefers-reduced-motion: reduce) {
+    .line-waves-container canvas {
+      opacity: 0.25;
+      animation: none !important;
+    }
+  }
   body {
-    @apply bg-background text-foreground font-sans;
+    /* Deliberately NOT opaque: an opaque body background paints over the
+       z-index:-1 animation layer, which made the background invisible. */
+    background: transparent;
+    @apply text-foreground font-sans;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }

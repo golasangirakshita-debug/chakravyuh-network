@@ -77,7 +77,8 @@ export default function NetworkPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [spiral, setSpiral] = useState(false);
   const [rings, setRings] = useState<SpiralGuide[]>([]);
-  const [breachOpen, setBreachOpen] = useState(false);
+  const [breachOpen, setBreachOpen] = useState(true);
+  const [ready, setReady] = useState(false);
   const [frozen, setFrozen] = useState<{ id: string; before: number; after: number } | null>(null);
   const [step, setStep] = useState<number | null>(null);
   const [searchQ, setSearchQ] = useState("");
@@ -171,9 +172,31 @@ export default function NetworkPage() {
       if (evt.target === cy) setSelection(null);
     });
     cy.on("render zoom pan layoutstop", updateHulls);
-    updateHulls();
+    // cose can settle outside the visible viewport, which reads as a blank
+    // graph. Fit once the layout finishes, and again after the first resize.
+    cy.one("layoutstop", () => {
+      cy.fit(undefined, 56);
+      updateHulls();
+    });
+    requestAnimationFrame(() => {
+      if (!containerRef.current) return;
+      const { offsetWidth: w, offsetHeight: h } = containerRef.current;
+      if (w > 0 && h > 0) cy.resize();
+      cy.fit(undefined, 56);
+      updateHulls();
+      setReady(true);
+    });
+
+    const ro = new ResizeObserver(() => {
+      if (!containerRef.current) return;
+      const { offsetWidth: w, offsetHeight: h } = containerRef.current;
+      if (w === 0 || h === 0) return;
+      cy.resize();
+    });
+    ro.observe(containerRef.current);
 
     return () => {
+      ro.disconnect();
       cy.destroy();
       cyRef.current = null;
     };
@@ -190,6 +213,7 @@ export default function NetworkPage() {
     cy.elements().remove();
     cy.add(els);
     cy.layout({ name: "cose", animate: false, padding: 44 }).run();
+    cy.fit(undefined, 56);
     audit("network.reload", `${graph.nodes.length} nodes`);
   }, [graph, audit]);
 
@@ -541,6 +565,25 @@ export default function NetworkPage() {
 
         <div ref={containerRef} className="absolute inset-0 z-10" />
 
+        {/* graph mount / layout state */}
+        {!ready && (
+          <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-[#070910]/85">
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative h-12 w-12">
+                <span className="absolute inset-0 rounded-full border border-[#22D3EE]/25" />
+                <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-[#22D3EE]" />
+                <span className="absolute inset-2 rounded-full border border-[#A78BFA]/30 animate-pulse" />
+              </div>
+              <p className="mono text-[11px] tracking-[0.28em] text-[#22D3EE]">
+                RESOLVING ENTITIES
+              </p>
+              <p className="mono text-[9px] tracking-[0.2em] text-white/30">
+                COSE LAYOUT · {graph.nodes.length} NODES · {graph.edges.length} EDGES
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* toolbar */}
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-start gap-2 p-3">
           <div className="pointer-events-auto flex flex-wrap items-center gap-2">
@@ -675,8 +718,15 @@ export default function NetworkPage() {
                             {b.type.toUpperCase()} · −{b.pairsLost} LINKS
                           </span>
                         </span>
-                        <span className="mono text-[10px] font-bold text-[#F59E0B]">
-                          {b.netFragments > 1 ? `${b.netFragments}⇩` : "—"}
+                        <span
+                          className={`mono text-[10px] font-bold ${
+                            b.fragmentsDelta > 0 ? "text-[#F59E0B]" : "text-white/20"
+                          }`}
+                          title={`splits the graph into ${b.fragmentsDelta + 1} piece${
+                            b.fragmentsDelta === 0 ? "" : "s"
+                          }`}
+                        >
+                          {b.fragmentsDelta > 0 ? `⇩${b.fragmentsDelta + 1}` : "—"}
                         </span>
                       </button>
                     </li>

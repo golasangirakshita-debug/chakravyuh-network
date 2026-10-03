@@ -137,13 +137,12 @@ function ConsoleSidebar({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { hitSidebar, endSession } = useVyuh();
+  const { endSession } = useVyuh();
   const { signOut } = useAuth();
   const activeIndex = navIndexForPath(location.pathname);
 
   const go = (index: number) => {
     navigate(NAV_ITEMS[index].path);
-    hitSidebar(index);
     onCloseMobile();
   };
 
@@ -160,7 +159,7 @@ function ConsoleSidebar({
   return (
     <aside
       className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-white/8 bg-[#0B0F1A]/92 backdrop-blur-xl transition-all duration-300 lg:static lg:z-auto ${
-        mobileOpen ? "translate-x-0" : "-translate-x-full"
+        `${mobileOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`
       } ${collapsed ? "w-[84px]" : "w-[268px]"}`}
     >
       {/* brand */}
