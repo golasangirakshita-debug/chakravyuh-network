@@ -19,7 +19,7 @@ export default function GhostPage() {
   const { cases, pushAudit } = useVyuh();
   const [adopted, setAdopted] = useState<Record<string, boolean>>({});
 
-  const holes = useMemo(() => structuralHoles(cases, 0.2), [cases]);
+  const holes = useMemo(() => structuralHoles(cases), [cases]);
   const cadences = useMemo(
     () => NET_IDS.map(id => ({ id, ...temporalCadence(id, cases) })),
     [cases],
@@ -36,7 +36,9 @@ export default function GhostPage() {
       <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
         <div className="space-y-5">
           <Panel>
-            <PanelTitle hint={`${GHOST_SEEDS.length} hypotheses`}>Seeded ghosts</PanelTitle>
+            <PanelTitle hint={`${GHOST_SEEDS.length} analyst hypotheses`}>
+              Analyst-authored ghosts
+            </PanelTitle>
             <div className="divide-y divide-white/6">
               {GHOST_SEEDS.map((g, i) => {
                 const on = !!adopted[g.id];
@@ -136,7 +138,7 @@ export default function GhostPage() {
 
         <div className="space-y-5">
           <Panel>
-            <PanelTitle hint="live from graph">Structural holes</PanelTitle>
+            <PanelTitle hint="computed from the graph">Structural holes</PanelTitle>
             {holes.length === 0 ? (
               <EmptyNote>No neighbourhood overlap above threshold.</EmptyNote>
             ) : (

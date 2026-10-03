@@ -794,10 +794,10 @@ export default function NetworkPage() {
 
           <p className="mt-2 text-[11px] leading-5 text-white/45">
             <span className="text-white/80">
-              CHAKRAVYUH would have flagged this network {story.daysEarly} days before
-              the 4th FIR
+              CHAKRAVYUH would have flagged this network {story.daysBeforeLast} days
+              before the last linked FIR
             </span>{" "}
-            ({story.nextFir}), across {story.statesAtFlag} states — on {story.flagDate}.
+            ({story.lastFir}), across {story.statesAtFlag} states — on {story.flagDate}.
           </p>
         </div>
       </div>

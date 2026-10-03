@@ -83,7 +83,8 @@ export function AnalyticsPage() {
                   </span>
                 </div>
                 <p className="mono mt-1 text-[10px] text-white/35">
-                  {r.type} · fragments into {r.fragments} · {r.cases.join(", ")}
+                  {r.type} · splits into {r.fragmentsDelta + 1} piece
+                  {r.fragmentsDelta === 0 ? "" : "s"} · {r.cases.join(", ")}
                 </p>
                 <RiskBar value={Math.min(100, r.pairsLost * 4)} className="mt-2" />
               </div>
@@ -113,8 +114,8 @@ export function AnalyticsPage() {
             <p className="mono text-[10px] tracking-[0.28em] text-white/35">EARLIEST FLAG</p>
             <p className="mt-2 text-sm leading-6 text-white/65">
               {story.flagDate} · {story.flaggedCases} FIRs across {story.statesAtFlag} states —{" "}
-              <span className="text-[#22D3EE]">{story.daysEarly} days</span> before{" "}
-              {story.nextFir}.
+              <span className="text-[#22D3EE]">{story.daysBeforeLast} days</span> before the last
+              linked FIR ({story.lastFir}).
             </p>
           </div>
         </Panel>

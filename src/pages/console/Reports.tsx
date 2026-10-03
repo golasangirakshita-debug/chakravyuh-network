@@ -25,7 +25,7 @@ export default function ReportsPage() {
   const { cases, pushAudit } = useVyuh();
   const [template, setTemplate] = useState<TemplateId>("briefing");
   const story = useMemo(() => flagStory(cases), [cases]);
-  const holes = useMemo(() => structuralHoles(cases, 0.2), [cases]);
+  const holes = useMemo(() => structuralHoles(cases), [cases]);
   const bridges = useMemo(() => breachRanks(cases).slice(0, 3), [cases]);
   const laundering = TRANSACTIONS.filter(t => t.amount >= 50000);
   const volume = TRANSACTIONS.reduce((n, t) => n + t.amount, 0);
@@ -45,9 +45,9 @@ export default function ReportsPage() {
             heading: "Earliest warning",
             body: `The network became visible on ${formatDate(story.flagDate)} when ${
               story.flaggedCases
-            } FIRs spanned ${story.statesAtFlag} states — ${story.daysEarly} day${
-              story.daysEarly === 1 ? "" : "s"
-            } before ${story.nextFir} was filed.`,
+            } FIRs spanned ${story.statesAtFlag} states — ${story.daysBeforeLast} day${
+              story.daysBeforeLast === 1 ? "" : "s"
+            } before the last linked FIR (${story.lastFir}) was filed.`,
           },
           {
             heading: "Financial exposure",

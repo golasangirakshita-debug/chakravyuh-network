@@ -16,6 +16,7 @@ import {
   TIMELINE_START,
   type CaseDef,
   type EntityDef,
+  type EntityType,
   type GraphEdge,
   type GraphNode,
   type NetworkId,
@@ -303,7 +304,11 @@ export interface BreachRank {
   nodeId: string;
   label: string;
   type: string;
+  /** Component count AFTER removal (absolute). */
   fragments: number;
+  /** How many EXTRA components removal creates over the uncut graph (delta). */
+  fragmentsDelta: number;
+  /** Same, restricted to non-noise cases. */
   netFragments: number;
   pairsLost: number;
   cases: string[];
@@ -334,19 +339,25 @@ export function breachRanks(cases: CaseDef[] = CASES): BreachRank[] {
     let pairsLost = 0;
     for (const p of before) if (!after.has(p)) pairsLost++;
     const ent = ENTITY_BY_ID[id];
+    const fragments = componentsFor(cases, id).length;
     return {
       nodeId: id,
       label: ent?.label ?? id,
       type: ent?.type ?? "entity",
-      fragments: componentsFor(cases, id).length,
+      fragments,
+      fragmentsDelta: Math.max(0, fragments - baseAll),
       netFragments: componentsFor(netCases, id).length - (baseNet - 1),
       pairsLost,
       cases: cases.filter(c => c.entities.includes(id)).map(c => c.id),
     };
   });
 
-  ranks.sort((a, b) => b.pairsLost - a.pairsLost || b.fragments - a.fragments);
-  void baseAll;
+  ranks.sort(
+    (a, b) =>
+      b.pairsLost - a.pairsLost ||
+      b.fragmentsDelta - a.fragmentsDelta ||
+      b.fragments - a.fragments,
+  );
   return ranks;
 }
 
@@ -371,16 +382,25 @@ export interface StructuralHole {
   network: NetworkId;
 }
 
-/** Pairs of entities that never share a case but whose neighbourhoods overlap. */
-export function structuralHoles(cases: CaseDef[] = CASES, minJaccard = 0.22): StructuralHole[] {
-  const ids = [...new Set(cases.flatMap(c => c.entities))].filter(
-    id => cases.filter(c => c.entities.includes(id)).length >= 1,
-  );
+/**
+ * Pairs of entities that never share a case but whose neighbourhoods overlap.
+ *
+ * Co-located pairs (e.g. two entities that both appear in the Delhi cluster) are
+ * excluded: their overlap is an artifact of geography, not evidence of a missing
+ * node. We require at least one INSTRUMENT (phone / bank / upi / alias) on each
+ * side, which is what a genuine missing handler or mule layer would look like.
+ */
+export function structuralHoles(cases: CaseDef[] = CASES, minJaccard = 0.1): StructuralHole[] {
+  const INSTRUMENTS: EntityType[] = ["phone", "bank", "upi", "alias"];
+  const hasInstrument = (id: string) => INSTRUMENTS.includes(ENTITY_BY_ID[id]?.type);
+
+  const ids = [...new Set(cases.flatMap(c => c.entities))];
   const holes: StructuralHole[] = [];
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
       const a = ids[i];
       const b = ids[j];
+      if (!hasInstrument(a) || !hasInstrument(b)) continue;
       const shareCase = cases.some(c => c.entities.includes(a) && c.entities.includes(b));
       if (shareCase) continue;
       const A = secondDegree(a, cases);
@@ -425,7 +445,13 @@ export interface FlagStory {
   flaggedCases: number;
   statesAtFlag: number;
   nextFir: string;
+  /** Days between the flag and the NEXT FIR filed after it. */
   daysEarly: number;
+  /** Last FIR in the network, and how many days after the flag it was filed. */
+  lastFir: string;
+  lastFirDate: string;
+  /** The “days saved” headline: flag date -> last linked FIR. */
+  daysBeforeLast: number;
 }
 
 /**
@@ -444,12 +470,16 @@ export function flagStory(cases: CaseDef[] = CASES): FlagStory {
   }
   const flagDate = sorted[idx].date;
   const nextFir = sorted[idx + 1] ?? sorted[idx];
+  const lastFir = sorted[sorted.length - 1] ?? nextFir;
   return {
     flagDate,
     flaggedCases: idx + 1,
     statesAtFlag: new Set(sorted.slice(0, idx + 1).map(c => c.state)).size,
     nextFir: nextFir.id,
     daysEarly: Math.max(0, daysBetween(flagDate, nextFir.date)),
+    lastFir: lastFir.id,
+    lastFirDate: lastFir.date,
+    daysBeforeLast: Math.max(0, daysBetween(flagDate, lastFir.date)),
   };
 }
 

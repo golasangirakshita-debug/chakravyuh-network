@@ -106,8 +106,10 @@ export default function DashboardPage() {
             </p>
             <p className="mt-2 font-display text-xl font-bold leading-7 text-white sm:text-2xl">
               CHAKRAVYUH would have flagged this network{" "}
-              <span className="text-gradient">{story.daysEarly} days before the 4th FIR</span>,
-              across {story.statesAtFlag} states — on {formatDate(story.flagDate)}.
+              <span className="text-gradient">
+                {story.daysBeforeLast} days before the last linked FIR
+              </span>
+              , across {story.statesAtFlag} states — on {formatDate(story.flagDate)}.
             </p>
           </div>
           <Link
