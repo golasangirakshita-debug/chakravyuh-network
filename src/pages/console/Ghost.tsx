@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import { GHOST_SEEDS, entityLabel } from "@/lib/data";
 import { structuralHoles, temporalCadence, levelOf } from "@/lib/analysis";
+import { deriveGraph } from "@/lib/data";
+import { trainGnn, predictLinks } from "@/lib/gnn";
+import { Link } from "react-router";
 import { useVyuh } from "@/store/vyuh";
 import { PageHeader, Panel, PanelTitle, RiskBar, LevelBadge, EmptyNote } from "./ui";
 
@@ -24,6 +27,13 @@ export default function GhostPage() {
     () => NET_IDS.map(id => ({ id, ...temporalCadence(id, cases) })),
     [cases],
   );
+
+  // The heuristic holes above are exact set arithmetic. This is the learned
+  // second opinion, kept visually separate so the two are never conflated.
+  const predicted = useMemo(() => {
+    const { nodes, edges } = deriveGraph(cases, []);
+    return predictLinks(trainGnn(nodes, edges, cases), { limit: 4, minScore: 0.5 });
+  }, [cases]);
 
   return (
     <div>
@@ -181,6 +191,41 @@ export default function GhostPage() {
                   </p>
                 </div>
               ))}
+            </div>
+          </Panel>
+
+          <Panel>
+            <PanelTitle hint="learned link head">
+              <span className="inline-flex items-center gap-2">
+                <CircleDot className="h-3.5 w-3.5 text-[#A78BFA]" /> Model-predicted gaps
+              </span>
+            </PanelTitle>
+            {predicted.length === 0 ? (
+              <EmptyNote>No unrecorded pairs above threshold</EmptyNote>
+            ) : (
+              <ul className="divide-y divide-white/6">
+                {predicted.map(l => (
+                  <li key={`${l.a}-${l.b}`} className="px-5 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="mono truncate text-[11.5px] text-white/85">
+                        {l.aLabel} ↔ {l.bLabel}
+                      </span>
+                      <span className="mono shrink-0 text-[11px] text-[#A78BFA]">
+                        {(l.score * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <p className="mono mt-1 text-[10px] text-white/40">request: {l.request}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="border-t border-white/8 px-5 py-3.5">
+              <Link
+                to="/console/neural"
+                className="mono inline-flex items-center gap-2 text-[10px] tracking-[0.2em] text-[#22D3EE] transition hover:text-white"
+              >
+                <ArrowRight className="h-3 w-3" /> OPEN NEURAL ENGINE
+              </Link>
             </div>
           </Panel>
 

@@ -22,6 +22,7 @@ const CasesPage = lazy(() => import("./pages/console/Cases.tsx"));
 const NetworkPage = lazy(() => import("./pages/console/Network.tsx"));
 const EvidencePage = lazy(() => import("./pages/console/Evidence.tsx"));
 const GhostPage = lazy(() => import("./pages/console/Ghost.tsx"));
+const NeuralPage = lazy(() => import("./pages/console/Neural.tsx"));
 const SearchPage = lazy(() => import("./pages/console/Search.tsx"));
 const TerminalPage = lazy(() => import("./pages/console/Terminal.tsx"));
 const KillChainPage = lazy(() => import("./pages/console/KillChain.tsx"));
@@ -166,6 +167,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route path="network" element={<NetworkPage />} />
                     <Route path="evidence" element={<EvidencePage />} />
                     <Route path="ghost" element={<GhostPage />} />
+                    <Route path="neural" element={<NeuralPage />} />
                     <Route path="search" element={<SearchPage />} />
                     <Route path="terminal" element={<TerminalPage />} />
                     <Route path="killchain" element={<KillChainPage />} />

@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Bell,
+  BrainCircuit,
   FileCheck2,
   FileText,
   FolderOpen,
@@ -29,6 +30,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Case Search", path: "/console/search", icon: Search, group: "core" },
   { label: "Network", path: "/console/network", icon: Share2, group: "core" },
   { label: "AI Analysis", path: "/console/ghost", icon: Radar, group: "core" },
+  { label: "Neural Engine", path: "/console/neural", icon: BrainCircuit, group: "core" },
   { label: "Terminal", path: "/console/terminal", icon: Terminal, group: "core" },
   { label: "Kill Chain", path: "/console/killchain", icon: GitBranch, group: "core" },
   { label: "Evidence", path: "/console/evidence", icon: FileCheck2, group: "core" },

@@ -433,7 +433,11 @@ const PIPELINE = [
   { icon: Inbox, title: "Ingest", copy: "FIRs, CDRs, bank rows and OSINT arrive raw." },
   { icon: Shuffle, title: "ETL Normalization", copy: "Messy fields become typed, dated, geocoded records." },
   { icon: Network, title: "Knowledge Graph", copy: "Entities resolve; every edge carries its source." },
-  { icon: ScanSearch, title: "AI Detection", copy: "Weighted signals rank networks for human review." },
+  {
+    icon: ScanSearch,
+    title: "Graph Neural Network",
+    copy: "A GCN fitted in-browser ranks entities, proposes unrecorded links and drafts the report.",
+  },
   { icon: FileCheck2, title: "Blockchain-secured Report", copy: "A hashed chain turns findings into evidence." },
 ];
 
