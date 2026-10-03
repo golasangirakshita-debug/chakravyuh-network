@@ -98,7 +98,7 @@ export default function Neural() {
   const meta = useMemo(() => describeGnn(ctx.gnn), [ctx]);
   const clusters = useMemo(() => clusterEmbeddings(ctx.gnn, 4), [ctx]);
   const anomalies = useMemo(() => detectAnomalies(ctx.gnn, 5), [ctx]);
-  const links = useMemo(() => predictLinks(ctx.gnn, { limit: 4, minScore: 0.5 }), [ctx]);
+  const links = useMemo(() => predictLinks(ctx.gnn, { limit: 6, minScore: 0.3 }), [ctx]);
 
   const runTask = useCallback(
     async (id: string) => {
@@ -218,6 +218,23 @@ export default function Neural() {
               <dd className="text-white/80">{ctx.gnn.dims.features}</dd>
               <dt className="text-white/40">Heads</dt>
               <dd className="text-white/80">{ctx.gnn.headNames.join(", ")}</dd>
+              <dt className="text-white/40">Class weight</dt>
+              <dd className="text-white/80">
+                {ctx.gnn.posWeight[0].toFixed(2)} / {ctx.gnn.posWeight[1].toFixed(2)}
+              </dd>
+              <dt className="text-white/40">Threshold</dt>
+              <dd className="text-white/80">
+                {ctx.gnn.threshold[0].toFixed(2)} / {ctx.gnn.threshold[1].toFixed(2)}
+              </dd>
+              <dt className="text-white/40">Restored epoch</dt>
+              <dd className="text-white/80">
+                {ctx.gnn.bestEpoch + 1} of {ctx.gnn.epochs}
+              </dd>
+              <dt className="text-white/40">Link candidates</dt>
+              <dd className="text-white/80">
+                {ctx.gnn.linkCandidates.recorded}/{ctx.gnn.linkCandidates.pairs} instrument pairs
+                recorded
+              </dd>
             </dl>
           </div>
           <div className="grid grid-cols-2 gap-3 self-start">
@@ -235,7 +252,7 @@ export default function Neural() {
             <Metric
               label="link head AUC"
               value={ctx.gnn.linkAuc.toFixed(3)}
-              sub={`held out · n=${ctx.gnn.linkTestSize}`}
+              sub={`held out · n=${ctx.gnn.linkTestSize} (${ctx.gnn.linkTestPositives} linked)`}
               tone="#F59E0B"
             />
             <Metric

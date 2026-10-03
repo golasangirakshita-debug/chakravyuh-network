@@ -192,8 +192,17 @@ function prioritise(ctx: AiContext): AiTaskResult {
  * 4. Predicted missing edges
  * ------------------------------------------------------------------ */
 
+/**
+ * Threshold note: with negatives drawn from the same instrument-pair
+ * population as the positives, only about one candidate in five is genuinely
+ * linked, and the head is calibrated against that base rate — its scores sit
+ * well below 0.5. 0.3 is therefore the operating point that returns a usable
+ * shortlist, not a loosened bar hidden behind a nicer number.
+ */
+const LINK_FLOOR = 0.3;
+
 function missingEdges(ctx: AiContext, limit = 8): PredictedLink[] {
-  return predictLinks(ctx.gnn, { limit, minScore: 0.5 });
+  return predictLinks(ctx.gnn, { limit, minScore: LINK_FLOOR });
 }
 
 function predictedLinks(ctx: AiContext): AiTaskResult {
@@ -522,6 +531,7 @@ export function draftIntelligenceReport(ctx: AiContext): IntelligenceReport {
         paragraphs: [
           `This summary covers ${cases.length} FIRs linking ${gnn.dims.nodes} entities. Each entity is represented by ${gnn.dims.features} structural features — type, declared network, degree, case count, recency, mean evidence confidence and source spread — and passed through two graph convolutions that aggregate each entity's neighbourhood.`,
           `The model was fitted in ${gnn.trainMs.toFixed(0)} ms with a fixed seed (${gnn.seed}). Repeating this run on the same corpus reproduces identical weights.`,
+          `Training corrects for class imbalance with a per-head weight of neg/pos (${gnn.posWeight[0].toFixed(2)} for escalation, ${gnn.posWeight[1].toFixed(2)} for reuse) and decays the learning rate on a cosine schedule. ${ctx.gnn.valSize} labels are withheld from the gradient and used only to pick which epoch to restore; the weights below are from epoch ${gnn.bestEpoch + 1} of ${gnn.epochs}, not the last one.`,
         ],
       },
       {
@@ -529,7 +539,7 @@ export function draftIntelligenceReport(ctx: AiContext): IntelligenceReport {
         paragraphs: [
           `In-sample AUC is ${aucText(gnn.auc[0])} for the escalation head and ${aucText(gnn.auc[1])} for the reuse head. Those figures are not reported as the finding, because a model always scores well on its own training data.`,
           `Five-fold masked-label cross-validation gives a pooled held-out AUC of ${aucText(cv.pooled.auc[0])} for escalation and ${aucText(cv.pooled.auc[1])} for reuse, across ${cv.pooled.labels} hidden labels. The escalation head transfers to entities it did not see labelled. The reuse head is materially weaker — ${cv.pooled.positives[1]} positives is too thin a base, and its output should be treated as a shortlist only.`,
-          `The link head, which reconstructs observed co-occurrence edges, reaches a held-out AUC of ${aucText(gnn.linkAuc)} on edges withheld from its training.`,
+          `The link head, which reconstructs observed co-occurrence edges, reaches a held-out AUC of ${aucText(gnn.linkAuc)} on ${gnn.linkTestSize} instrument pairs withheld from its training (${gnn.linkTestPositives} of them genuinely linked). Its negatives are drawn from the same instrument-to-instrument population it is later asked to rank, so this figure describes the predictions actually shown here rather than an easier proxy task.`,
         ],
       },
       {

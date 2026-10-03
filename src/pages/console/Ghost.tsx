@@ -32,7 +32,7 @@ export default function GhostPage() {
   // second opinion, kept visually separate so the two are never conflated.
   const predicted = useMemo(() => {
     const { nodes, edges } = deriveGraph(cases, []);
-    return predictLinks(trainGnn(nodes, edges, cases), { limit: 4, minScore: 0.5 });
+    return predictLinks(trainGnn(nodes, edges, cases), { limit: 4, minScore: 0.3 });
   }, [cases]);
 
   return (

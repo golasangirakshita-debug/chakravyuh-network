@@ -78,4 +78,22 @@ describe("report drafting", () => {
     expect(report.caveat).toContain("charge sheet");
     expect(report.caveat).toContain("Does not determine guilt");
   });
+
+  test("the report states how the model was trained, not just how it scored", () => {
+    const text = report.sections.flatMap(s => s.paragraphs).join(" ");
+    // Class weighting, epoch restoration and the link head's held-out
+    // composition all have to appear, because each one qualifies the headline
+    // numbers printed beside them.
+    expect(text).toContain("neg/pos");
+    expect(text).toContain(ctx.gnn.posWeight[1].toFixed(2));
+    expect(text).toContain(`epoch ${ctx.gnn.bestEpoch + 1} of ${ctx.gnn.epochs}`);
+    expect(text).toContain(String(ctx.gnn.linkTestPositives));
+    expect(text).toContain(String(ctx.gnn.linkTestSize));
+  });
+
+  test("predicted links still reach the console after the calibration change", async () => {
+    const result = await AI_TASKS.find(t => t.id === "graph.links")!.run(ctx);
+    expect(result.rows.length).toBeGreaterThan(0);
+    for (const r of result.rows) expect(r.label.length).toBeGreaterThan(0);
+  });
 });

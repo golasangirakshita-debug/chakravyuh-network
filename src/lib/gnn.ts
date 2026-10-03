@@ -11,7 +11,7 @@
  *
  * Two learned heads:
  *   0 "escalation" — will this entity end up inside a high-risk FIR?
- *   1 "pivot"      — is it a structural bridge whose removal fragments the graph?
+ *   1 "reuse"      — is this instrument re-used across two or more separate FIRs?
  *
  * A separate bilinear link head is trained to reconstruct observed edges, and
  * is then used to propose entity pairs that are NOT in any record.
@@ -264,9 +264,11 @@ export function buildFeatures(
   const conf = new Map<string, { sum: number; c: number }>();
   const spread = new Map<string, Set<string>>();
 
+  const nodeAt = new Map(nodes.map((v, i) => [v.id, i]));
   for (const e of edges) {
     for (const id of [e.source, e.target]) {
-      deg[nodes.findIndex(x => x.id === id)] += 1;
+      const at = nodeAt.get(id);
+      if (at !== undefined) deg[at] += 1;
       const cur = conf.get(id) ?? { sum: 0, c: 0 };
       cur.sum += e.confidence;
       cur.c += 1;
@@ -277,7 +279,6 @@ export function buildFeatures(
     }
   }
 
-  const nodeAt = new Map(nodes.map((v, i) => [v.id, i]));
   const dates = nodes.map(v => v.date).sort();
   const earliest = dates[0] ?? "2026-01-01";
 
@@ -295,7 +296,6 @@ export function buildFeatures(
     X.data[off + TYPES.length + NETS.length + 4] = c ? c.sum / c.c : 0.5;
     X.data[off + TYPES.length + NETS.length + 5] = (spread.get(node.id)?.size ?? 0) / 4;
   }
-  void nodeAt;
   return X;
 }
 
@@ -354,7 +354,27 @@ export interface GnnResult {
   features: Map<string, number[]>;
   headNames: readonly string[];
   lossCurve: number[];
+  /** In-sample AUC over the labels the gradient was allowed to see. */
   auc: [number, number];
+  /**
+   * AUC over the internal validation split — labels deliberately withheld
+   * from the gradient and used only to choose the epoch to restore. NaN when a
+   * caller-supplied mask (crossValidate) took that role instead.
+   */
+  valAuc: [number, number];
+  /**
+   * Labels held out of the gradient for epoch selection, and the weighted loss
+   * on them. This is an epoch-selection signal, NOT a generalisation claim:
+   * at 15% of 68 labels the slice holds roughly one reuse positive, so any AUC
+   * computed on it swings between 0 and 1 on rounding alone.
+   */
+  valSize: number;
+  valLoss: number;
+  /** Epoch whose weights survived restoration, and the class weights used. */
+  bestEpoch: number;
+  posWeight: [number, number];
+  /** Operating point per head, chosen by Youden's J rather than fixed at 0.5. */
+  threshold: [number, number];
   accuracy: [number, number];
   positives: [number, number];
   dims: { nodes: number; features: number; hidden: number; outputs: number; params: number };
@@ -363,6 +383,10 @@ export interface GnnResult {
   /** Held-out AUC of the link head; the training fit is not reported. */
   linkTrainAuc: number;
   linkTestSize: number;
+  /** Positives inside that held-out slice — an AUC over few is not a claim. */
+  linkTestPositives: number;
+  /** Candidate population the head was trained and ranked over. */
+  linkCandidates: { instruments: number; pairs: number; recorded: number };
   /** Trained weights of the link-reconstruction head, used by predictLinks. */
   link: { w: Float64Array; b: number };
   seed: number;
@@ -393,6 +417,52 @@ function aucScore(scores: number[], labels: number[]): number {
   return (sumPos - (pos * (pos + 1)) / 2) / (pos * neg);
 }
 
+/**
+ * One training run.
+ *
+ * Three things a plain full-batch loop gets wrong on a 34-node graph:
+ *
+ *  1. Class balance. The reuse head has 8 positives against 60 negatives, so
+ *     unweighted BCE spends almost all of its gradient pushing everything below
+ *     0.5. Each head therefore gets pos_weight = neg/pos, the standard
+ *     correction for imbalanced binary cross-entropy.
+ *  2. A fixed learning rate. The cosine decay below lets the first epochs move
+ *     fast and the last ones settle instead of oscillating around the optimum.
+ *  3. No way to stop early. Weights are restored from the best-validation
+ *     epoch rather than taken from whichever epoch happened to be last.
+ *
+ * The validation split is only carved out when the caller supplies no mask.
+ * crossValidate passes its own mask and needs every remaining label for
+ * gradient, so it keeps the original train-on-everything behaviour and reports
+ * `auc` over those labels with valAuc left as NaN.
+ */
+/** Threshold maximising (sensitivity + specificity − 1) over the given labels. */
+function bestThreshold(scores: number[], labels: number[]): number {
+  const cands = Array.from(new Set(scores)).sort((a, b) => a - b);
+  if (!cands.length) return 0.5;
+  const mid = (v: number) => (Math.round(v * 1e6) + 0.5) / 1e6;
+  let best = 0.5;
+  let bestJ = -Infinity;
+  for (const c of cands) {
+    const t = mid(c);
+    let tp = 0;
+    let fp = 0;
+    let fn = 0;
+    let tn = 0;
+    for (let i = 0; i < scores.length; i++) {
+      const hit = scores[i] >= t;
+      if (labels[i] === 1) hit ? tp++ : fn++;
+      else hit ? fp++ : tn++;
+    }
+    const j = tp / Math.max(1, tp + fn) + tn / Math.max(1, tn + fp) - 1;
+    if (j > bestJ) {
+      bestJ = j;
+      best = t;
+    }
+  }
+  return best;
+}
+
 function trainOnce(
   X: Tensor,
   Y: Tensor,
@@ -416,15 +486,65 @@ function trainOnce(
   const sW2 = adamState(W2.data.length);
   const sb2 = adamState(K);
 
+  // Positions the gradient is allowed to see.
+  const open: number[] = [];
+  for (let i = 0; i < n * K; i++) {
+    const row = Math.floor(i / K);
+    const col = i % K;
+    if (!mask || !mask(row, col)) open.push(i);
+  }
+
+  // Internal validation split, only when the caller has not supplied a mask.
+  const isVal = new Uint8Array(n * K);
+  if (!mask) {
+    const shuf = open.slice();
+    const vrand = mulberry32(opts.seed + 991);
+    for (let i = shuf.length - 1; i > 0; i--) {
+      const j = Math.floor(vrand() * (i + 1));
+      [shuf[i], shuf[j]] = [shuf[j], shuf[i]];
+    }
+    const take = Math.max(K, Math.floor(shuf.length * 0.15));
+    for (let i = 0; i < take; i++) isVal[shuf[i]] = 1;
+  }
+  const trainPos = open.filter(i => !isVal[i]);
+  const valPos = open.filter(i => isVal[i]);
+
+  // pos_weight per head, from the labels the gradient actually sees.
+  const posWeight = new Float64Array(K);
+  for (let k = 0; k < K; k++) {
+    let pos = 0;
+    let neg = 0;
+    for (const i of trainPos) {
+      if (i % K !== k) continue;
+      if (Y.data[i] === 1) pos++;
+      else neg++;
+    }
+    posWeight[k] = pos > 0 ? neg / pos : 1;
+  }
+
   const lossCurve: number[] = [];
   const gW1 = tensor(F, H);
   const gW2 = tensor(H, K);
   const gb1 = new Float64Array(H);
   const gb2 = new Float64Array(K);
 
-  let used = 0;
-  for (let i = 0; i < n; i++)
-    for (let j = 0; j < K; j++) if (!mask || !mask(i, j)) used++;
+  const bce = (positions: number[], P: Tensor) => {
+    let sum = 0;
+    for (const i of positions) {
+      const y = Y.data[i];
+      const p = Math.min(1 - 1e-7, Math.max(1e-7, P.data[i]));
+      const w = y === 1 ? posWeight[i % K] : 1;
+      sum += -w * (y * Math.log(p) + (1 - y) * Math.log(1 - p));
+    }
+    return sum / Math.max(1, positions.length);
+  };
+
+  let bestLoss = Infinity;
+  let bestEpoch = -1;
+  const bestW1 = new Float64Array(W1.data.length);
+  const bestB1 = new Float64Array(b1.length);
+  const bestW2 = new Float64Array(W2.data.length);
+  const bestB2 = new Float64Array(b2.length);
 
   for (let epoch = 0; epoch < opts.epochs; epoch++) {
     // forward
@@ -434,27 +554,31 @@ function trainOnce(
     const Z = broadcast(propagate(adj, matmul(Hm, W2), n), b2);
     const P = sigmoid(Z);
 
-    // loss (masked BCE)
-    let loss = 0;
-    for (let i = 0; i < n; i++)
-      for (let j = 0; j < K; j++) {
-        if (mask && mask(i, j)) continue;
-        const off = i * K + j;
-        const y = Y.data[off];
-        const p = Math.min(1 - 1e-7, Math.max(1e-7, P.data[off]));
-        loss += -(y * Math.log(p) + (1 - y) * Math.log(1 - p));
-      }
-    loss = loss / Math.max(1, used);
-    lossCurve.push(loss);
+    const trainLoss = bce(trainPos, P);
+    lossCurve.push(trainLoss);
+
+    // Restore from the best-validation epoch, judged on labels never trained.
+    const judge = valPos.length ? valPos : trainPos;
+    const score = bce(judge, P);
+    if (score < bestLoss) {
+      bestLoss = score;
+      bestEpoch = epoch;
+      bestW1.set(W1.data);
+      bestB1.set(b1);
+      bestW2.set(W2.data);
+      bestB2.set(b2);
+    }
+
+    // Cosine decay from lr down to lr/20.
+    const lr = opts.lr * (0.05 + 0.95 * (1 + Math.cos((Math.PI * epoch) / Math.max(1, opts.epochs))) / 2);
 
     // backward
     const dZ = tensor(n, K);
-    for (let i = 0; i < n; i++)
-      for (let j = 0; j < K; j++) {
-        const off = i * K + j;
-        if (mask && mask(i, j)) continue;
-        dZ.data[off] = (P.data[off] - Y.data[off]) / Math.max(1, used);
-      }
+    for (const off of trainPos) {
+      const y = Y.data[off];
+      const w = y === 1 ? posWeight[off % K] : 1;
+      dZ.data[off] = (w * (P.data[off] - y)) / Math.max(1, trainPos.length);
+    }
 
     // Â is symmetric, so Âᵀ = Â
     const g2 = propagate(adj, dZ, n);
@@ -477,10 +601,17 @@ function trainOnce(
     gb1.set(gb1d);
     gb2.set(gb2d);
 
-    adamUpdate(W1, gW1, sW1, opts.lr, opts.l2);
-    adamUpdate(b1 ? { data: b1, rows: 1, cols: H } : W1, { data: gb1, rows: 1, cols: H }, sb1, opts.lr, 0);
-    adamUpdate(W2, gW2, sW2, opts.lr, opts.l2);
-    adamUpdate({ data: b2, rows: 1, cols: K }, { data: gb2, rows: 1, cols: K }, sb2, opts.lr, 0);
+    adamUpdate(W1, gW1, sW1, lr, opts.l2);
+    adamUpdate({ data: b1, rows: 1, cols: H }, { data: gb1, rows: 1, cols: H }, sb1, lr, 0);
+    adamUpdate(W2, gW2, sW2, lr, opts.l2);
+    adamUpdate({ data: b2, rows: 1, cols: K }, { data: gb2, rows: 1, cols: K }, sb2, lr, 0);
+  }
+
+  if (bestEpoch >= 0) {
+    W1.data.set(bestW1);
+    b1.set(bestB1);
+    W2.data.set(bestW2);
+    b2.set(bestB2);
   }
 
   const pre1 = broadcast(propagate(adj, matmul(X, W1), n), b1);
@@ -488,7 +619,42 @@ function trainOnce(
   for (let i = 0; i < pre1.data.length; i++) Hm.data[i] = Math.max(0, pre1.data[i]);
   const Z = broadcast(propagate(adj, matmul(Hm, W2), n), b2);
   const P = sigmoid(Z);
-  return { W1, b1, W2, b2, Hm, P, lossCurve };
+
+  // Two disjoint measures, so neither can flatter the other. A slice needs at
+  // least MIN_CLASS of each class before its AUC means anything; below that the
+  // answer is NaN rather than a confident-looking number derived from two or
+  // three points.
+  const MIN_CLASS = 4;
+  const aucOf = (positions: number[], pick: (i: number) => number) => {
+    if (positions.length < 2) return NaN;
+    const scores: number[] = [];
+    const labels: number[] = [];
+    for (const i of positions) {
+      if (i % K !== pick(i)) continue;
+      scores.push(P.data[i]);
+      labels.push(Y.data[i]);
+    }
+    const pos = labels.filter(v => v === 1).length;
+    if (pos < MIN_CLASS || labels.length - pos < MIN_CLASS) return NaN;
+    return aucScore(scores, labels);
+  };
+  return {
+    W1,
+    b1,
+    W2,
+    b2,
+    Hm,
+    P,
+    lossCurve,
+    bestEpoch,
+    posWeight,
+    valAuc: [aucOf(valPos, () => 0), aucOf(valPos, () => 1)] as [number, number],
+    trainAuc: [aucOf(trainPos, () => 0), aucOf(trainPos, () => 1)] as [number, number],
+    valSize: valPos.length,
+    valLoss: bce(valPos, P),
+    trainPos,
+    valPos,
+  };
 }
 
 function transposeMatrix(a: Tensor): Tensor {
@@ -528,6 +694,13 @@ function pairWidth(h: number, f: number) {
  * predictLinks uses — an earlier version trained on raw activations, so the
  * reported accuracy described a model that was never the one being applied.
  *
+ * Negatives are drawn from the SAME candidate population predictLinks ranks:
+ * instrument-to-instrument pairs with no recorded co-occurrence. Drawing them
+ * uniformly from all nodes instead made most negatives trivially separable by
+ * the type/network feature rows, so the head learned "is this an instrument"
+ * rather than "should these two be linked" — and its scores said nothing about
+ * the instrument pairs it was actually asked about at inference time.
+ *
  * Reports AUC on a held-out 25% of edges, not the training fit.
  */
 function trainLinkHead(
@@ -556,24 +729,41 @@ function trainLinkHead(
     return out;
   };
 
-  const positives = shuffle(graph.pairs);
-  const negPool: [number, number][] = [];
-  const seen = new Set<string>();
-  let guard = 0;
-  while (negPool.length < positives.length * 2 && guard++ < positives.length * 200) {
-    const a = Math.floor(rand() * graph.nodes.length);
-    const c = Math.floor(rand() * graph.nodes.length);
-    if (a === c) continue;
-    const key = a < c ? `${a}|${c}` : `${c}|${a}`;
-    if (graph.pairWeight.has(key) || seen.has(key)) continue;
-    seen.add(key);
-    negPool.push([a, c]);
+  // The candidate space is exactly what predictLinks enumerates: every pair of
+// instrument nodes. Training on the same population is what makes the held-out
+// AUC here a statement about the predictions the console actually shows.
+  const instruments = graph.nodes
+    .map((n, i) => ({ n, i }))
+    .filter(x => INSTRUMENTS.includes(x.n.type));
+  const positives: [number, number][] = [];
+  const negatives: [number, number][] = [];
+  for (let a = 0; a < instruments.length; a++) {
+    for (let b = a + 1; b < instruments.length; b++) {
+      const i = instruments[a].i;
+      const j = instruments[b].i;
+      const key = i < j ? `${i}|${j}` : `${j}|${i}`;
+      (graph.pairWeight.has(key) ? positives : negatives).push([i, j]);
+    }
   }
+  if (!positives.length)
+    return {
+      W,
+      b,
+      params: W.data.length + 1,
+      auc: NaN,
+      trainAuc: NaN,
+      curve: [],
+      testSize: 0,
+      testPositives: 0,
+      candidates: { instruments: instruments.length, pairs: 0, recorded: 0 },
+    };
+  const posShuffled = shuffle(positives);
+  const negShuffled = shuffle(negatives);
 
   // Stratified split: an unstratified 75/25 cut put every positive edge in the
   // training slice, leaving a single-class test set and an undefined AUC.
-  const posRows = positives.map(([a, c]) => [a, c, 1] as [number, number, number]);
-  const negRows = shuffle(negPool).map(([a, c]) => [a, c, 0] as [number, number, number]);
+  const posRows = posShuffled.map(([a, c]) => [a, c, 1] as [number, number, number]);
+  const negRows = negShuffled.map(([a, c]) => [a, c, 0] as [number, number, number]);
   const split = (rows: [number, number, number][]) => {
     const cut = Math.max(1, Math.min(rows.length - 1, Math.floor(rows.length * 0.75)));
     return { train: rows.slice(0, cut), test: rows.slice(cut) };
@@ -624,7 +814,21 @@ function trainLinkHead(
     scoreRows(train),
     train.map(s => s[2]),
   );
-  return { W, b, params: W.data.length + 1, auc: heldAuc, trainAuc, curve, testSize: test.length };
+  return {
+    W,
+    b,
+    params: W.data.length + 1,
+    auc: heldAuc,
+    trainAuc,
+    curve,
+    testSize: test.length,
+    testPositives: test.filter(t => t[2] === 1).length,
+    candidates: {
+      instruments: instruments.length,
+      pairs: positives.length + negatives.length,
+      recorded: positives.length,
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -633,8 +837,23 @@ function trainLinkHead(
 
 const cache = new Map<string, GnnResult>();
 
+/**
+ * Content hash, not just lengths. The console trains against filtered case
+ * subsets, so two different selections can share every length and still be a
+ * different training set — a length-only key returned stale weights.
+ */
 function signature(nodes: GraphNode[], edges: GraphEdge[], cases: CaseDef[]) {
-  return `${nodes.length}:${edges.length}:${cases.length}:${cases[cases.length - 1]?.id ?? ""}:${nodes[0]?.id ?? ""}`;
+  let h = 2166136261;
+  const mix = (s: string) => {
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+  };
+  for (const n of nodes) mix(`${n.id}:${n.type}:${n.caseIds.join(",")};`);
+  for (const e of edges) mix(`${e.source}>${e.target}:${e.confidence};`);
+  for (const c of cases) mix(`${c.id}:${c.risk}:${c.entities.join(",")};`);
+  return `${nodes.length}|${edges.length}|${cases.length}|${(h >>> 0).toString(36)}`;
 }
 
 export function trainGnn(
@@ -661,7 +880,8 @@ export function trainGnn(
   const Y = buildTargets(graph.nodes, cases);
   const adj = normaliseAdjacency(graph.nodes.length, graph.links);
 
-  const { Hm, P, lossCurve } = trainOnce(X, Y, adj, opts);
+  const { Hm, P, lossCurve, bestEpoch, posWeight, valAuc, valSize, valLoss, trainAuc } =
+    trainOnce(X, Y, adj, opts);
   const rawVectors: number[][] = [];
   for (let i = 0; i < graph.nodes.length; i++) {
     const v: number[] = [];
@@ -680,9 +900,12 @@ export function trainGnn(
   const link = trainLinkHead(rawVectors, featVectors, graph, opts);
 
   const K = HEAD_NAMES.length;
-  const auc: [number, number] = [NaN, NaN];
+  // trainAuc is measured on exactly the labels the gradient saw; the validation
+  // split is reported separately rather than being folded into this number.
+  const auc: [number, number] = trainAuc;
   const accuracy: [number, number] = [0, 0];
   const positives: [number, number] = [0, 0];
+  const threshold: [number, number] = [0.5, 0.5];
   const scores: number[][] = [[], []];
   const labels: number[][] = [[], []];
 
@@ -714,10 +937,14 @@ export function trainGnn(
 
   for (let k = 0; k < K; k++) {
     positives[k] = labels[k].filter(l => l === 1).length;
-    auc[k] = aucScore(scores[k], labels[k]);
+    // Class weighting deliberately moves the operating point away from 0.5, so
+    // accuracy is read at the threshold that maximises Youden's J rather than
+    // at a threshold the loss no longer centres on.
+    const thr = bestThreshold(scores[k], labels[k]);
+    threshold[k] = thr;
     let hit = 0;
     for (let i = 0; i < labels[k].length; i++)
-      if ((scores[k][i] >= 0.5 ? 1 : 0) === labels[k][i]) hit++;
+      if ((scores[k][i] >= thr ? 1 : 0) === labels[k][i]) hit++;
     accuracy[k] = hit / Math.max(1, labels[k].length);
   }
 
@@ -730,6 +957,12 @@ export function trainGnn(
     headNames: HEAD_NAMES,
     lossCurve,
     auc,
+    valAuc,
+    valSize,
+    valLoss,
+    bestEpoch,
+    posWeight: [posWeight[0] as number, posWeight[1] as number],
+    threshold,
     accuracy,
     positives,
     dims: {
@@ -743,6 +976,8 @@ export function trainGnn(
     linkAuc: link.auc,
     linkTrainAuc: link.trainAuc,
     linkTestSize: link.testSize,
+    linkTestPositives: link.testPositives,
+    linkCandidates: link.candidates,
     link: { w: link.W.data.slice(), b: link.b[0] },
     seed: opts.seed,
     epochs: opts.epochs,
@@ -983,6 +1218,8 @@ export interface FoldResult {
   heldOut: number;
   /** Positives inside the held-out slice — AUC is NaN without both classes. */
   heldOutPositives: number[];
+  /** Class weights this fold actually trained with, for auditability. */
+  posWeight: number[];
 }
 
 /** Masked-label cross-validation: the honest generalisation number. */
@@ -1043,7 +1280,7 @@ export function crossValidate(
     }
     const scores: number[][] = [[], []];
     const labels: number[][] = [[], []];
-    const { P } = trainOnce(X, Y, adj, opts, (row, col) => heldMask[row * K + col] === 1);
+    const { P, posWeight } = trainOnce(X, Y, adj, opts, (row, col) => heldMask[row * K + col] === 1);
     for (const [row, col] of held) {
       scores[col].push(P.data[row * K + col]);
       labels[col].push(Y.data[row * K + col]);
@@ -1055,6 +1292,7 @@ export function crossValidate(
       auc: [aucScore(scores[0], labels[0]), aucScore(scores[1], labels[1])],
       heldOut: held.length,
       heldOutPositives: labels.map(l => l.filter(v => v === 1).length),
+      posWeight: Array.from(posWeight),
     });
   }
   return {

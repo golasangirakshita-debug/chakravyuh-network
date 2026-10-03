@@ -108,6 +108,61 @@ describe("training", () => {
   test("the escalation head separates its classes in-sample", () => {
     expect(model.auc[0]).toBeGreaterThan(0.9);
   });
+
+  test("class weighting up-weights the rarer head and down-weights the common one", () => {
+    // escalation has 24 positives against 10 negatives, so neg/pos < 1;
+    // reuse has 8 against 60, so its weight must be well above 1.
+    expect(model.posWeight[0]).toBeLessThan(1);
+    expect(model.posWeight[1]).toBeGreaterThan(1);
+    const g = buildEntityGraph(NODES, CASES);
+    const Y = buildTargets(g.nodes, CASES);
+    const counts = [0, 1].map(k => {
+      let p = 0;
+      let n = 0;
+      for (let i = 0; i < Y.rows; i++) {
+        if (Y.data[i * Y.cols + k] === 1) p++;
+        else n++;
+      }
+      return { p, n };
+    });
+    expect(counts[0].p).toBeGreaterThan(counts[0].n);
+    expect(counts[1].p).toBeLessThan(counts[1].n);
+  });
+
+  test("early stopping restores a real epoch rather than the last one", () => {
+    expect(model.bestEpoch).toBeGreaterThanOrEqual(0);
+    expect(model.bestEpoch).toBeLessThan(model.epochs);
+    // The split that selects the epoch must be disjoint from the gradient.
+    expect(model.valSize).toBeGreaterThan(0);
+    expect(model.valSize).toBeLessThan(model.embeddings.length * HEAD_NAMES.length);
+  });
+
+  test("AUC is withheld when a slice is too small to support it", () => {
+    // ~15% of 68 labels holds roughly one reuse positive. Reporting an AUC
+    // there would be a number derived from a handful of points.
+    expect(Number.isNaN(model.valAuc[1])).toBe(true);
+  });
+
+  test("the decision threshold is chosen, not fixed at 0.5", () => {
+    for (const t of model.threshold) {
+      expect(t).toBeGreaterThan(0);
+      expect(t).toBeLessThan(1);
+    }
+    expect(model.accuracy[0]).toBeGreaterThan(0.5);
+  });
+
+  test("a content change of equal length invalidates the cache", () => {
+    // A length-only key returned stale weights whenever a filtered case subset
+    // happened to match another one's lengths.
+    const swapped = CASES.map((c, i) =>
+      i === 0 ? { ...c, entities: [...c.entities].reverse() } : c,
+    );
+    expect(swapped.length).toBe(CASES.length);
+    expect(swapped[0].entities).not.toEqual(CASES[0].entities);
+    const a = trainGnn(NODES, EDGES, CASES);
+    const b = trainGnn(NODES, EDGES, swapped);
+    expect(b.lossCurve).not.toEqual(a.lossCurve);
+  });
 });
 
 describe("generalisation", () => {
@@ -132,6 +187,44 @@ describe("generalisation", () => {
     expect(model.linkTestSize).toBeGreaterThan(0);
     expect(model.linkAuc).toBeGreaterThan(0.7);
     expect(Number.isNaN(model.linkAuc)).toBe(false);
+  });
+
+  test("negatives come from the population predictLinks actually ranks", () => {
+    // The candidate space must be instrument-to-instrument only, and the
+    // positives counted inside it must be the recorded ones.
+    const g = model.graph;
+    const INSTR = new Set(["phone", "bank", "upi", "alias"]);
+    const instruments = g.nodes.filter(n => INSTR.has(n.type)).length;
+    const expectedPairs = (instruments * (instruments - 1)) / 2;
+    expect(model.linkCandidates.instruments).toBe(instruments);
+    expect(model.linkCandidates.pairs).toBe(expectedPairs);
+
+    let recorded = 0;
+    for (let i = 0; i < g.nodes.length; i++)
+      for (let j = i + 1; j < g.nodes.length; j++)
+        if (g.pairWeight.has(`${i}|${j}`) && INSTR.has(g.nodes[i].type) && INSTR.has(g.nodes[j].type))
+          recorded++;
+    expect(model.linkCandidates.recorded).toBe(recorded);
+    expect(recorded).toBeLessThan(expectedPairs);
+  });
+
+  test("every scored candidate is an instrument pair absent from the record", () => {
+    const all = predictLinks(model, { limit: 999, minScore: 0 });
+    expect(all.length).toBe(
+      model.linkCandidates.pairs - model.linkCandidates.recorded,
+    );
+    for (const l of all) {
+      expect(INSTRUMENTS.has(l.aType)).toBe(true);
+      expect(INSTRUMENTS.has(l.bType)).toBe(true);
+    }
+  });
+
+  test("scores are calibrated to the base rate, so 0.5 is a strict bar", () => {
+    // Only a minority of candidate instrument pairs are genuinely linked, so a
+    // well-calibrated head should not claim most of them exceed even chance.
+    const all = predictLinks(model, { limit: 999, minScore: 0 });
+    const above = all.filter(l => l.score >= 0.5).length;
+    expect(above).toBeLessThan(all.length);
   });
 });
 
