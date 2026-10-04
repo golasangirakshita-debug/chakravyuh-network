@@ -91,7 +91,7 @@ export default defineConfig({
       '@vly-ai/integrations',
     ],
   },
-  // Performance hints
+
   server: {
     // Bind to all interfaces so the browser runtime's server-ready event fires.
     host: true,
