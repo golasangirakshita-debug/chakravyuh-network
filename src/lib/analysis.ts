@@ -578,3 +578,4 @@ export const LABYRINTH_STEPS = [
   { key: "bridge", label: "The hinge", match: (n: GraphNode) => n.id === "bk-3310", caption: "Mule account XXXX3310 — the single record that quietly joins the two rings." },
   { key: "neta", label: "Core · Network A", match: (n: GraphNode) => n.network === "NET-A", caption: "Six FIRs, one alias, one account. The core was reachable from the first ring." },
 ] as const;
+
