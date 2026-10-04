@@ -135,6 +135,7 @@ if (result.success) {
 To verify the integration is properly configured:
 
 ```typescript
+
 const hasIntegration = !!process.env.VLY_INTEGRATION_KEY;
 if (!hasIntegration) {
   console.error("VLY integration key not found");
