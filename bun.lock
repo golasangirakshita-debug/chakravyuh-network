@@ -3,6 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
+
       "name": "vite-template",
       "dependencies": {
         "@convex-dev/auth": "^0.0.90",
