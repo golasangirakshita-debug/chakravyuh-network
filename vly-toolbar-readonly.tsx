@@ -1,4 +1,3 @@
-// DO NOT MODIFY THIS FILE. THIS FILE IS READ-ONLY. CONTAINS ALL KEY APP FUNCTIONALITY.
 
 import React, { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
