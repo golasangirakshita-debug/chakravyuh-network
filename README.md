@@ -277,7 +277,6 @@ await ctx.runMutation(internal.users.update, {
 });
 ```
 
-
 ## Common Convex Mistakes To Avoid
 
 When using convex, make sure:
