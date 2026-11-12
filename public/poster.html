@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chakravyuh — Investigator Intelligence Platform · Poster</title>
+    <style>
+      /* ============================================================
+         A2 portrait poster. Print with Ctrl/Cmd+P → Save as PDF,
+         paper size A2 (or A3 at ~71% scale). No external assets.
+         ============================================================ */
+
+      :root {
+        --ink: #05080f;
+        --panel: #0a1120;
+        --panel-2: #0d1526;
+        --line: rgba(255, 255, 255, 0.1);
+        --line-soft: rgba(255, 255, 255, 0.06);
+        --cyan: #22d3ee;
+        --amber: #f59e0b;
+        --violet: #a78bfa;
+        --emerald: #34d399;
+        --text: #e8eef8;
+        --muted: #8b9ab0;
+        --dim: #5f6d82;
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      @page { size: 420mm 594mm; margin: 0; }
+
+      html { background: #02040a; }
+
+      body {
+        font-family: var(--sans);
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
+        display: flex;
+        justify-content: center;
+      }
+
+      /* Screen preview: shrink to something viewable. Print resets to 1. */
+      @media screen {
+        body { padding: 32px 0; }
+        .sheet { zoom: 0.46; }
+      }
+      @media print {
+        .sheet { zoom: 1; }
+      }
+
+      .sheet {
+        width: 420mm;
+        height: 594mm;
+        position: relative;
+        overflow: hidden;
+        background:
+          radial-gradient(120% 60% at 78% -8%, rgba(34, 211, 238, 0.11), transparent 62%),
+          radial-gradient(90% 55% at 8% 104%, rgba(167, 139, 250, 0.1), transparent 60%),
+          radial-gradient(70% 40% at 50% 46%, rgba(245, 158, 11, 0.045), transparent 70%),
+          linear-gradient(180deg, #060b16 0%, #05080f 46%, #04060d 100%);
+        display: flex;
+        flex-direction: column;
+        padding: 20mm 18mm 14mm;
+      }
+
+      /* Hairline grid texture */
+      .sheet::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+        background-size: 14mm 14mm;
+        pointer-events: none;
+      }
+
+      .sheet > * { position: relative; z-index: 1; }
+
+      /* ---------------- header ---------------- */
+
+      header {
+        display: grid;
+        grid-template-columns: 1fr 88mm;
+        gap: 10mm;
+        align-items: start;
+        padding-bottom: 9mm;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 3.1mm;
+        letter-spacing: 0.34em;
+        text-transform: uppercase;
+        color: var(--cyan);
+        display: flex;
+        align-items: center;
+        gap: 3mm;
+      }
+      .eyebrow::before {
+        content: "";
+        width: 10mm;
+        height: 1px;
+        background: var(--cyan);
+        opacity: 0.7;
+      }
+
+      h1 {
+        font-size: 30mm;
+        line-height: 0.94;
+        letter-spacing: -0.035em;
+        font-weight: 800;
+        margin-top: 5mm;
+        background: linear-gradient(96deg, #ffffff 12%, #9fe9f6 52%, #22d3ee 88%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .subtitle {
+        font-size: 7.4mm;
+        font-weight: 300;
+        letter-spacing: 0.02em;
+        color: #cfd9e8;
+        margin-top: 3mm;
+      }
+
+      .tagline {
+        font-size: 4.15mm;
+        line-height: 1.55;
+        color: var(--muted);
+        margin-top: 5mm;
+        max-width: 208mm;
+      }
+      .tagline strong { color: var(--text); font-weight: 600; }
+
+      /* spiral motif */
+      .spiral { width: 88mm; height: 88mm; opacity: 0.92; }
+
+      /* ---------------- metric strip ---------------- */
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+        margin: 9mm 0 10mm;
+        border: 1px solid var(--line);
+        border-radius: 3mm;
+        background: linear-gradient(180deg, rgba(13, 21, 38, 0.92), rgba(8, 13, 24, 0.92));
+        overflow: hidden;
+      }
+      .metric {
+        padding: 7mm 7mm 6.4mm;
+        border-left: 1px solid var(--line-soft);
+      }
+      .metric:first-child { border-left: 0; }
+      .metric .k {
+        font-family: var(--mono);
+        font-size: 2.75mm;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+      .metric .v {
+        font-family: var(--mono);
+        font-size: 14.6mm;
+        line-height: 1;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        margin-top: 2.6mm;
+      }
+      .metric .v small { font-size: 5.4mm; font-weight: 600; margin-left: 0.8mm; }
+      .metric .s {
+        font-size: 3.05mm;
+        color: var(--muted);
+        margin-top: 2.6mm;
+        line-height: 1.4;
+      }
+
+      .c-cyan { color: var(--cyan); }
+      .c-amber { color: var(--amber); }
+      .c-violet { color: var(--violet); }
+      .c-emerald { color: var(--emerald); }
+
+      /* ---------------- body grid ---------------- */
+
+      .body {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8mm 9mm;
+        flex: 1;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 3mm;
+        background: linear-gradient(180deg, rgba(13, 21, 38, 0.72), rgba(7, 12, 22, 0.72));
+        padding: 6.4mm 7mm 6.8mm;
+      }
+
+      .card h2 {
+        font-family: var(--mono);
+        font-size: 3.15mm;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--cyan);
+        display: flex;
+        align-items: center;
+        gap: 2.6mm;
+        padding-bottom: 3.4mm;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .card h2 .dot {
+        width: 1.9mm;
+        height: 1.9mm;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: 0.85;
+      }
+      .card p {
+        font-size: 3.55mm;
+        line-height: 1.62;
+        color: #b9c5d6;
+        margin-top: 3.4mm;
+      }
+      .card p strong { color: var(--text); font-weight: 650; }
+      .card p .hl { color: var(--amber); font-weight: 600; }
+
+      /* formula block */
+      .formula {
+        font-family: var(--mono);
+        font-size: 3.5mm;
+        line-height: 1.95;
+        color: #cfe4f2;
+        background: rgba(2, 6, 14, 0.72);
+        border: 1px solid var(--line-soft);
+        border-left: 2px solid var(--cyan);
+        border-radius: 1.6mm;
+        padding: 4.2mm 5mm;
+        margin-top: 3.8mm;
+        white-space: pre;
+        overflow: hidden;
+      }
+      .formula .cmt { color: var(--dim); }
+      .formula .op { color: var(--amber); }
+
+      /* ---------------- tables ---------------- */
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 3.8mm;
+        font-size: 3.3mm;
+      }
+      table th {
+        font-family: var(--mono);
+        font-size: 2.7mm;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--dim);
+        text-align: right;
+        padding: 0 0 2.2mm;
+        font-weight: 500;
+        border-bottom: 1px solid var(--line);
+      }
+      table th:first-child { text-align: left; }
+      table td {
+        padding: 3.1mm 0;
+        border-bottom: 1px solid var(--line-soft);
+        font-family: var(--mono);
+        text-align: right;
+        color: #dbe5f2;
+      }
+      table td:first-child {
+        text-align: left;
+        font-family: var(--sans);
+        color: var(--text);
+        font-weight: 600;
+      }
+      table tr:last-child td { border-bottom: 0; }
+      table td.big { font-size: 4.6mm; font-weight: 700; }
+      .tag {
+        display: inline-block;
+        font-family: var(--mono);
+        font-size: 2.5mm;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 0.9mm 2mm;
+        border-radius: 1.2mm;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        vertical-align: middle;
+      }
+      .tag.warn { color: var(--amber); border-color: rgba(245, 158, 11, 0.4); }
+      .tag.ok { color: var(--emerald); border-color: rgba(52, 211, 153, 0.35); }
+
+      /* node list */
+      .nodes { margin-top: 3.6mm; display: flex; flex-direction: column; gap: 2.6mm; }
+      .node-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: baseline;
+        gap: 4mm;
+        padding: 2.6mm 0;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .node-row:last-child { border-bottom: 0; }
+      .node-row .n {
+        font-family: var(--mono);
+        font-size: 3.5mm;
+        color: #dbe5f2;
+      }
+      .node-row .d {
+        font-family: var(--mono);
+        font-size: 2.9mm;
+        color: var(--amber);
+        white-space: nowrap;
+      }
+
+      /* task grid */
+      .tasks {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 2.2mm;
+        margin-top: 3.6mm;
+      }
+      .task {
+        font-family: var(--mono);
+        font-size: 2.72mm;
+        letter-spacing: 0.02em;
+        color: #c4d1e2;
+        padding: 2.4mm 2.4mm;
+        border: 1px solid var(--line-soft);
+        border-radius: 1.4mm;
+        background: rgba(2, 6, 14, 0.5);
+        line-height: 1.35;
+      }
+      .task span { color: var(--violet); }
+
+      /* ---------------- footer ---------------- */
+
+      footer {
+        margin-top: 8mm;
+        padding-top: 5.4mm;
+        border-top: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8mm;
+        align-items: end;
+      }
+      .caveat {
+        font-size: 3.2mm;
+        line-height: 1.55;
+        color: var(--muted);
+        border-left: 1.6px solid var(--amber);
+        padding-left: 4mm;
+      }
+      .caveat strong { color: var(--amber); font-weight: 650; }
+      .colophon {
+        font-family: var(--mono);
+        font-size: 2.7mm;
+        color: var(--dim);
+        text-align: right;
+        line-height: 1.75;
+        white-space: nowrap;
+      }
+      .colophon b { color: var(--muted); font-weight: 500; }
+    </style>
+  </head>
+  <body>
+    <main class="sheet">
+      <header>
+        <div>
+          <div class="eyebrow">Synthetic corpus · In-browser inference · Research prototype</div>
+          <h1>CHAKRAVYUH</h1>
+          <div class="subtitle">Investigator Intelligence Platform</div>
+          <p class="tagline">
+            A graph neural network that reads a fragmented case record, learns the structure
+            underneath it, and says which leads to pull first. <strong>Every figure on this
+            poster is reproducible from a fixed seed</strong> against the corpus in the system —
+            and every one of them was measured by running the code, not estimated.
+          </p>
+        </div>
+
+        <!-- spiral: the chakravyuh formation -->
+        <svg class="spiral" viewBox="0 0 200 200" fill="none" aria-hidden="true">
+          <defs>
+            <radialGradient id="g1" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.62" />
+              <stop offset="100%" stop-color="#22d3ee" stop-opacity="0" />
+            </radialGradient>
+            <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#22d3ee" />
+              <stop offset="55%" stop-color="#a78bfa" />
+              <stop offset="100%" stop-color="#f59e0b" />
+            </linearGradient>
+          </defs>
+          <circle cx="100" cy="100" r="86" fill="url(#g1)" opacity="0.5" />
+          <g stroke="url(#g2)" stroke-linecap="round" fill="none" opacity="0.9">
+            <path d="M100 100 C100 82 118 78 126 92 C136 110 118 128 96 126 C66 123 52 96 60 70 C70 38 108 26 138 44 C176 66 184 116 156 148" stroke-width="1.5" />
+            <path d="M100 100 C100 88 111 85 116 94 C122 105 111 116 98 115 C80 113 71 97 76 81 C82 61 105 53 123 64 C147 78 152 110 135 130" stroke-width="1.1" opacity="0.75" />
+            <path d="M100 100 C100 94 106 92 109 97 C112 103 106 109 99 108 C90 107 85 99 88 91 C91 81 103 77 112 83 C123 90 126 106 117 116" stroke-width="0.8" opacity="0.6" />
+          </g>
+          <g fill="#e8eef8">
+            <circle cx="100" cy="100" r="2.6" />
+            <circle cx="126" cy="92" r="1.9" fill="#22d3ee" />
+            <circle cx="96" cy="126" r="1.9" fill="#f59e0b" />
+            <circle cx="60" cy="70" r="1.9" fill="#a78bfa" />
+            <circle cx="138" cy="44" r="1.6" fill="#22d3ee" opacity="0.8" />
+            <circle cx="156" cy="148" r="1.6" fill="#f59e0b" opacity="0.8" />
+          </g>
+        </svg>
+      </header>
+
+      <!-- headline metrics -->
+      <section class="metrics">
+        <div class="metric">
+          <div class="k">Pooled held-out AUC</div>
+          <div class="v c-emerald">0.967</div>
+          <div class="s">Escalation head · 5-fold masked-label<br />cross-validation, 68 labels</div>
+        </div>
+        <div class="metric">
+          <div class="k">Parameters</div>
+          <div class="v c-cyan">371</div>
+          <div class="s">306 GCN + 65 link head<br />GCN(16 → 16 → 2)</div>
+        </div>
+        <div class="metric">
+          <div class="k">Fit time</div>
+          <div class="v c-violet">72<small>ms</small></div>
+          <div class="s">Trained in the browser, full-batch<br />Adam. No backend GPU.</div>
+        </div>
+        <div class="metric">
+          <div class="k">Test suite</div>
+          <div class="v c-amber">57</div>
+          <div class="s">Assertions: 1,209 · 0 failing<br />4 test files</div>
+        </div>
+      </section>
+
+      <div class="body">
+        <!-- LEFT COLUMN -->
+        <div style="display: flex; flex-direction: column; gap: 8mm">
+          <section class="card">
+            <h2><i class="dot"></i>The problem</h2>
+            <p>
+              <strong>12 FIRs. 34 entities. One investigation</strong> — scattered across phone
+              numbers, bank accounts, UPI handles, aliases, people and places. The links that
+              matter are the ones nobody wrote down.
+            </p>
+            <p>
+              Conventional tooling ranks these with hand-written heuristics. Those are
+              defensible, but blind to structure a model can learn: the neighbourhood an entity
+              sits inside, not just the row describing it.
+            </p>
+          </section>
+
+          <section class="card">
+            <h2><i class="dot"></i>The model is a real GCN</h2>
+            <p>
+              A Kipf &amp; Welling graph convolutional network — not a metaphor for one. Two
+              convolutions aggregate each entity's neighbourhood before anything is predicted.
+            </p>
+            <div class="formula"><span class="cmt"># symmetric-normalised adjacency, with self-loops</span>
+Â <span class="op">=</span> D<sup>-1/2</sup> (A + I) D<sup>-1/2</sup>
+
+<span class="cmt"># two graph convolutions</span>
+H <span class="op">=</span> ReLU( Â · X · W₁ + b₁ )
+Z <span class="op">=</span>       Â · H · W₂ + b₂</div>
+            <p>
+              Inputs are <strong>16 structural features</strong> per entity: type, declared
+              network, degree, case count, instrument flag, recency, mean evidence confidence and
+              source spread. Glorot initialisation from a seeded <em>mulberry32</em> PRNG, so the
+              same corpus always produces the same weights.
+            </p>
+          </section>
+
+          <section class="card">
+            <h2><i class="dot"></i>What it learns to recognise</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Head</th>
+                  <th>Definition</th>
+                  <th>Positives</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>escalation</td>
+                  <td>entity appears in a FIR with risk ≥ 70</td>
+                  <td class="c-cyan">24</td>
+                </tr>
+                <tr>
+                  <td>reuse</td>
+                  <td>instrument re-used across 2+ separate FIRs</td>
+                  <td class="c-violet">8</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              Both labels are derived from facts already in the corpus, so the neighbourhood term
+              is what generalises them — not a memorised lookup.
+            </p>
+          </section>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div style="display: flex; flex-direction: column; gap: 8mm">
+          <section class="card">
+            <h2><i class="dot"></i>Results — held-out, not self-scored</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Head</th>
+                  <th>In-sample</th>
+                  <th>Pooled held-out</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>escalation</td>
+                  <td>1.000</td>
+                  <td class="big c-emerald">0.967</td>
+                </tr>
+                <tr>
+                  <td>reuse <span class="tag warn">thin</span></td>
+                  <td>0.832</td>
+                  <td class="big c-amber">0.625</td>
+                </tr>
+                <tr>
+                  <td>link head <span class="tag">n=17</span></td>
+                  <td>0.982</td>
+                  <td class="big c-cyan">0.827</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              In-sample AUC is reported so it can be dismissed. A model always scores well on its
+              own training data — <strong>the held-out column is the finding</strong>.
+            </p>
+            <p>
+              The link head reconstructs co-occurrence edges it never saw, then proposes pairs that
+              appear in <span class="hl">no record at all</span>. Its negatives are drawn from the
+              same instrument-to-instrument population it is later asked to rank, so its AUC
+              describes the predictions actually shown — not an easier proxy task.
+            </p>
+          </section>
+
+          <section class="card">
+            <h2><i class="dot"></i>Training rigour</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Mechanism</th>
+                  <th>Setting</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>Class-weighted BCE</td><td>0.40 / 3.29 <span class="tag">neg÷pos</span></td></tr>
+                <tr><td>Cosine LR decay</td><td>0.080 → 0.004</td></tr>
+                <tr><td>Early stopping</td><td>epoch 37 of 320</td></tr>
+                <tr><td>Youden's-J threshold</td><td>0.40 / 0.52</td></tr>
+                <tr><td>Held-out labels</td><td>68 across 5 folds</td></tr>
+              </tbody>
+            </table>
+            <p>
+              Weights come from the best-validation epoch, <strong>not the last one</strong>. The
+              validation slice is withheld from the gradient entirely and used only to choose when
+              to stop — because at ten labels it selects an epoch, it cannot support an AUC.
+            </p>
+          </section>
+        </div>
+      </div>
+
+      <!-- full width: structure + tasks -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 9mm; margin-top: 8mm">
+        <section class="card">
+          <h2><i class="dot"></i>Structure recovered without being told</h2>
+          <p>
+            Clustering the learned vectors — with the declared network label never used as an
+            input — recovers <strong>4 communities at 1.00 purity</strong>. Independent evidence
+            that the features carry real structural signal.
+          </p>
+          <p style="margin-top: 3mm">
+            Exact connectivity analysis then names the nodes whose removal fragments the
+            investigation. This is <strong>arithmetic, not inference</strong>:
+          </p>
+          <div class="nodes">
+            <div class="node-row"><span class="n">XXXX3310</span><span class="d">+1 piece · 21 pairs lost</span></div>
+            <div class="node-row"><span class="n">alias “Ravi”</span><span class="d">+1 piece · 9 pairs lost</span></div>
+            <div class="node-row"><span class="n">1800123456</span><span class="d">+1 piece · 9 pairs lost</span></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><i class="dot"></i>Ten tasks on the same graph</h2>
+          <p style="margin-top: 0">
+            The model is the substrate, not the product. Each task below runs against the trained
+            graph and returns rows an investigator can act on.
+          </p>
+          <div class="tasks">
+            <div class="task"><span>›</span> graph.reconstruct</div>
+            <div class="task"><span>›</span> graph.generalise</div>
+            <div class="task"><span>›</span> graph.prioritise</div>
+            <div class="task"><span>›</span> graph.links</div>
+            <div class="task"><span>›</span> graph.pivots</div>
+            <div class="task"><span>›</span> graph.communities</div>
+            <div class="task"><span>›</span> graph.anomalies</div>
+            <div class="task"><span>›</span> temporal.forecast</div>
+            <div class="task"><span>›</span> intel.brief</div>
+            <div class="task"><span>›</span> integrity.verify</div>
+          </div>
+          <p style="margin-top: 4mm">
+            The report drafter assembles six sections from live computed values — so a wrong
+            number is visible in the row beside it. <strong>14 of 66 instrument pairs</strong> are
+            recorded; the remainder are where the model looks for gaps.
+          </p>
+        </section>
+      </div>
+
+      <footer>
+        <p class="caveat">
+          <strong>What this does not claim.</strong> The reuse head rests on 8 positives and the
+          link head on 14 — both are shortlists, not findings. The system ranks leads for human
+          review; it does not determine guilt, does not establish criminal liability, and is not a
+          charge sheet. All entities and FIRs are synthetic.
+        </p>
+        <div class="colophon">
+          <b>React · Vite · TypeScript · Convex · Cytoscape</b><br />
+          seed 20260618 · 34 nodes · 16 features<br />
+          57 tests · 1,209 assertions · 0 failing
+        </div>
+      </footer>
+    </main>
+  </body>
+</html>
