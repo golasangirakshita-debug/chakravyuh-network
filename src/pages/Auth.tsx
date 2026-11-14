@@ -23,8 +23,14 @@ interface AuthProps {
 }
 
 function resolveRedirectAfterAuth(returnTo: string | null, fallback = "/console") {
-  if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) return returnTo;
-  return fallback;
+  if (!returnTo?.startsWith("/") || returnTo.startsWith("//")) return fallback;
+  // Never send a freshly authenticated user back to an auth route — that is a
+  // guaranteed redirect loop the moment a returnTo ever points at /auth.
+  const path = returnTo.toLowerCase();
+  if (path === "/auth" || path.startsWith("/auth?") || path === "/login" || path.startsWith("/login?")) {
+    return fallback;
+  }
+  return returnTo;
 }
 
 /* ---------------- animated network (left pane) ---------------- */
@@ -123,7 +129,7 @@ type Step = "credentials" | "handshake" | "mfa" | "opening";
 
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
-  const { startSession, pushAudit } = useVyuh();
+  const { session, startSession, pushAudit } = useVyuh();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = resolveRedirectAfterAuth(
@@ -139,11 +145,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [error, setError] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
 
+  // An existing session of either kind skips the form. This effect previously
+  // held only a comment, so a signed-in visitor was left staring at the login
+  // fields with no way forward except re-entering credentials.
   useEffect(() => {
-    if (!authLoading && isAuthenticated && step === "credentials") {
-      // A live Convex session already exists — go straight to the console.
-    }
-  }, [authLoading, isAuthenticated, step]);
+    if (step !== "credentials") return;
+    if (!authLoading && isAuthenticated) navigate(redirect, { replace: true });
+    else if (session) navigate(redirect, { replace: true });
+  }, [authLoading, isAuthenticated, session, step, redirect, navigate]);
 
   useEffect(() => () => timers.current.forEach(t => window.clearTimeout(t)), []);
 
@@ -173,10 +182,23 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       result: "OK",
     });
     try {
-      // Anchor the session in Convex so RequireAuth agrees with our badge login.
-      await signIn("anonymous");
-    } catch {
-      // Already signed in (or offline) — the local investigator session stands.
+      // Anchor the session in Convex so server-side functions see a user.
+      // Bounded, because a stalled auth call used to leave the user stuck on
+      // "opening" with no feedback. On failure the local investigator session
+      // still stands and RequireAuth accepts it.
+      await Promise.race([
+        signIn("anonymous"),
+        new Promise((_, reject) =>
+          window.setTimeout(() => reject(new Error("anchor timeout")), 8000),
+        ),
+      ]);
+    } catch (err) {
+      pushAudit({
+        ts: new Date().toISOString(),
+        actor: INVESTIGATOR.badge,
+        action: "session.anchor degraded",
+        result: `WARN ${(err as Error).message.slice(0, 60)}`,
+      });
     }
     navigate(redirect, { replace: true });
   };

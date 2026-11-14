@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
+import { useVyuh } from "@/store/vyuh";
 import { Loader2, Lock } from "lucide-react";
 import type { ReactNode } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
@@ -20,6 +21,13 @@ import { Navigate, useLocation, useNavigate } from "react-router";
  * were moved. The block is now stated on the page they landed on, and sign-in
  * still returns them to it via `returnTo`. Pass `redirectImmediately` for a
  * route where the bounce really is the better experience.
+ *
+ * The app has two notions of "signed in": the investigator session in the
+ * store (created on the auth page) and the Convex session anchored behind it.
+ * This gate used to check only Convex. When the anonymous sign-in call failed
+ * or had not yet propagated, the local session existed but the gate still
+ * refused — so signing in bounced you straight back to the sign-in screen, in
+ * a loop, with no error shown. Either session is now enough.
  */
 export function RequireAuth({
   children,
@@ -36,10 +44,16 @@ export function RequireAuth({
   redirectImmediately?: boolean;
 }) {
   const { isLoading, isAuthenticated } = useAuth();
+  const { session } = useVyuh();
   const navigate = useNavigate();
   const location = useLocation();
 
-  if (isLoading) {
+  const signedIn = isAuthenticated || session !== null;
+
+  // Only block on loading when we have nothing to go on. A live local session
+  // is authoritative; waiting on the Convex user query in that case produced an
+  // endless spinner whenever that query was slow.
+  if (isLoading && !session) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -47,7 +61,7 @@ export function RequireAuth({
     );
   }
 
-  if (!isAuthenticated) {
+  if (!signedIn) {
     const returnTo = `${location.pathname}${location.search}`;
     const signInHref = `/auth?returnTo=${encodeURIComponent(returnTo)}`;
 
