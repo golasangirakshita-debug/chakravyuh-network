@@ -1,936 +1,984 @@
-import cytoscape from "cytoscape";
-import type { Core } from "cytoscape";
-import { useVyuh } from "@/store/vyuh";
-import { deriveGraph, type GraphNode, type SourceType } from "@/lib/data";
+import { api } from "@/convex/_generated/api";
 import {
-  analyzeSelection,
-  breachRanks,
-  casesUpToDate,
-  componentsFor,
-  flagStory,
-  FRAGMENT_COLORS,
-  LABYRINTH_STEPS,
-  spiralLayout,
-  timelineDays,
-  type BreachRank,
-  type SpiralGuide,
-} from "@/lib/analysis";
-import { AnimatePresence, motion } from "framer-motion";
+  CASES,
+  CDR_ROWS,
+  EVIDENCE,
+  GHOST_SEEDS,
+  NODES,
+  EDGES,
+  SOURCE_COLOR,
+  TRANSACTIONS,
+  type GraphEdge,
+} from "@/lib/data";
 import {
-  Compass,
-  Pause,
-  Play,
-  RotateCcw,
-  Search as SearchIcon,
-  Snowflake,
-  Sparkles,
+  clusterEmbeddings,
+  detectAnomalies,
+  predictLinks,
+  trainGnn,
+  type Anomaly,
+  type Cluster,
+} from "@/lib/gnn";
+import { useQuery } from "convex/react";
+import cytoscape, { type Core, type ElementDefinition, type StylesheetJson } from "cytoscape";
+import { motion } from "framer-motion";
+import {
+  ChevronDown,
+  Crosshair,
+  Eye,
+  EyeOff,
+  Ghost,
+  Loader2,
+  Maximize2,
+  Search,
   Waypoints,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
-import IntelPanel from "./IntelPanel";
-import {
-  buildElements,
-  CY_STYLE,
-  LAYER_META,
-  netClass,
-  NODE_VISUALS,
-} from "./networkElements";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-const RM = () =>
-  typeof window !== "undefined" &&
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/* ==================================================================== *
+ * Visual configuration
+ * ==================================================================== */
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const NET_COLOR: Record<string, string> = {
+  "NET-A": "#22D3EE",
+  "NET-B": "#F59E0B",
+  NOISE: "#8B93A7",
+  GHOST: "#EF4444",
+};
 
-const HULLS = [
-  { key: "neta", label: "NET-A", color: "#22D3EE" },
-  { key: "netb", label: "NET-B", color: "#A78BFA" },
-  { key: "noise", label: "NOISE", color: "#6B7280" },
-] as const;
+const TYPE_COLOR: Record<string, string> = {
+  phone: "#F59E0B",
+  bank: "#22C55E",
+  upi: "#A3E635",
+  alias: "#A78BFA",
+  location: "#94A3B8",
+  person: "#F5F7FB",
+  case: "#22D3EE",
+};
 
-const TOOLBTN =
-  "mono inline-flex items-center gap-2 rounded-full border border-white/12 bg-[#0B0F1A]/85 px-3.5 py-2 text-[10px] font-bold tracking-[0.14em] text-white/70 backdrop-blur transition hover:border-white/30 hover:text-white";
+/** Deterministic jitter so the layout is identical on every mount. */
+function prng(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
-export default function NetworkPage() {
-  const { cases, extraEntities, highlightPhones, pushAudit, session } = useVyuh();
-  const [params] = useSearchParams();
+/** Avatar as an inline SVG data URI — no network fetch, no broken images. */
+function avatarURI(label: string, ring: string, ghost = false): string {
+  const initials = ghost
+    ? "?"
+    : label
+        .replace(/[^\p{L}\p{N}\s]/gu, "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map(s => s[0]?.toUpperCase() ?? "")
+        .join("") || "?";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="84" height="84" viewBox="0 0 84 84">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="${ring}" stop-opacity="0.92"/>
+<stop offset="1" stop-color="#0B1018" stop-opacity="0.96"/>
+</linearGradient></defs>
+<circle cx="42" cy="42" r="40" fill="url(#g)" stroke="${ghost ? "#EF4444" : "#0B1018"}" stroke-width="2"/>
+<text x="42" y="43" text-anchor="middle" dominant-baseline="central"
+ font-family="ui-sans-serif,system-ui,sans-serif" font-size="${initials.length > 1 ? 30 : 36}"
+ font-weight="700" fill="#0A0E15">${initials}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const cyRef = useRef<Core | null>(null);
-  const ringRef = useRef<SVGGElement | null>(null);
-  const hullRefs = {
-    neta: useRef<HTMLDivElement | null>(null),
-    netb: useRef<HTMLDivElement | null>(null),
-    noise: useRef<HTMLDivElement | null>(null),
+/* ==================================================================== *
+ * Element construction
+ * ==================================================================== */
+
+interface GraphBundle {
+  elements: ElementDefinition[];
+  positions: Record<string, { x: number; y: number }>;
+  satellites: number;
+}
+
+function buildGraph(): GraphBundle {
+  const els: ElementDefinition[] = [];
+  const pos: Record<string, { x: number; y: number }> = {};
+  const rand = prng(20260618);
+
+  const hubs = NODES.filter(n => n.kind === "entity" && n.type === "person");
+  const cases = NODES.filter(n => n.kind === "case");
+  const others = NODES.filter(n => n.kind === "entity" && n.type !== "person");
+
+  /* ---- hubs sit on a wide ring, grouped by network ---- */
+  const hubIds = new Set(hubs.map(h => h.id));
+  hubs.forEach((h, i) => {
+    const angle = (i / Math.max(1, hubs.length)) * Math.PI * 2 - Math.PI / 2;
+    pos[h.id] = { x: Math.cos(angle) * 620, y: Math.sin(angle) * 430 };
+  });
+
+  /* ---- case nodes on an inner ring ---- */
+  cases.forEach((c, i) => {
+    const angle = (i / Math.max(1, cases.length)) * Math.PI * 2 - Math.PI / 2 + 0.22;
+    pos[c.id] = { x: Math.cos(angle) * 300, y: Math.sin(angle) * 210 };
+  });
+
+  /* ---- entity satellites fan outward from the centre ---- */
+  others.forEach((n, i) => {
+    const angle = (i / Math.max(1, others.length)) * Math.PI * 2 - Math.PI / 2;
+    const radius = 900 + (i % 4) * 130 + rand() * 90;
+    pos[n.id] = { x: Math.cos(angle) * radius * 1.25, y: Math.sin(angle) * radius * 0.82 };
+  });
+
+  /* ---- activity satellites: real CDR rows and transactions ---- */
+  let satellites = 0;
+  const activityHost = new Map<string, { x: number; y: number }>();
+  const attach = (hostId: string, key: string, label: string, kind: string, color: string, when: string) => {
+    const host = pos[hostId];
+    if (!host) return;
+    const bucket = activityHost.get(hostId) ?? { x: host.x, y: host.y };
+    const idx = satellites++;
+    const spread = 0.55;
+    const a = rand() * Math.PI * 2;
+    const r = 110 + Math.sqrt(idx % 40) * 34 + rand() * 26;
+    pos[key] = {
+      x: bucket.x + Math.cos(a) * r * (1 + spread * rand()),
+      y: bucket.y + Math.sin(a) * r * 0.72,
+    };
+    els.push({
+      group: "nodes",
+      data: { id: key, kind: "activity", type: kind, label, when, network: "" },
+      classes: `activity act-${kind}`,
+      style: { "background-color": color, "border-color": color },
+    });
   };
 
-  const [selection, setSelection] = useState<{ type: "node" | "edge"; id: string } | null>(null);
-  const [layers, setLayers] = useState<Record<SourceType, boolean>>({
-    fir: true,
-    cdr: true,
-    financial: true,
-    osint: true,
+  for (const row of CDR_ROWS) {
+    const host = NODES.find(n => n.type === "phone" && n.label === row.phone);
+    if (!host) continue;
+    attach(host.id, `act-${row.id}`, row.city, "call", TYPE_COLOR.phone, row.ts);
+  }
+  for (const t of TRANSACTIONS) {
+    const host = NODES.find(
+      n =>
+        (n.type === "bank" && t.to.includes(n.label.slice(-4))) ||
+        (n.type === "upi" && n.label === t.to) ||
+        (n.type === "bank" && t.from.includes(n.label.slice(-4))),
+    );
+    if (!host) continue;
+    attach(host.id, `act-${t.id}`, `₹${Math.round(t.amount / 1000)}k`, "money", TYPE_COLOR.bank, t.date);
+  }
+  for (const e of EVIDENCE.slice(0, 18)) {
+    const key = `ev-${e.id}`;
+    const host = NODES.find(n => n.kind === "case" && n.id === e.caseId);
+    if (!host) continue;
+    attach(host.id, key, e.type, "evidence", "#64748B", e.timestamp);
+  }
+
+  /* ---- the ghost node: pinned, ambiguous, highest priority ---- */
+  const ghost = GHOST_SEEDS[0];
+  const ghostId = "GHOST";
+  pos[ghostId] = { x: 0, y: -40 };
+
+  /* ---- real nodes ---- */
+  for (const n of [...hubs, ...cases, ...others]) {
+    const isHub = hubIds.has(n.id);
+    els.push({
+      group: "nodes",
+      data: {
+        id: n.id,
+        kind: isHub ? "hub" : n.kind,
+        type: n.type,
+        label: isHub ? `${n.label}\n${n.sub ?? n.type}` : n.label,
+        fullLabel: n.label,
+        network: n.network,
+        date: n.date,
+        sub: n.sub ?? "",
+        cases: n.caseIds.length,
+        avatar: isHub ? avatarURI(n.label, NET_COLOR[n.network] ?? "#22D3EE") : "",
+      },
+      classes: [
+        isHub ? "hub" : n.kind,
+        n.type,
+        n.network === "NET-A" ? "neta" : n.network === "NET-B" ? "netb" : "noise",
+      ].join(" "),
+      style: isHub ? { "background-image": avatarURI(n.label, NET_COLOR[n.network] ?? "#22D3EE") } : undefined,
+    });
+  }
+
+  els.push({
+    group: "nodes",
+    data: {
+      id: ghostId,
+      kind: "ghost",
+      type: "unknown",
+      label: "Unknown handler",
+      fullLabel: ghost.title,
+      network: "GHOST",
+      cases: 0,
+      avatar: avatarURI("?", "#EF4444", true),
+    },
+    classes: "ghost",
+    style: { "background-image": avatarURI("?", "#EF4444", true) },
   });
-  const [replayIdx, setReplayIdx] = useState<number | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [spiral, setSpiral] = useState(false);
-  const [rings, setRings] = useState<SpiralGuide[]>([]);
-  const [breachOpen, setBreachOpen] = useState(true);
+
+  /* ---- edges ---- */
+  const addEdge = (id: string, s: string, t: string, type: string, confidence: number) => {
+    if (!pos[s] || !pos[t]) return;
+    els.push({
+      group: "edges",
+      data: { id, source: s, target: t, sourceType: type, confidence, date: "" },
+      classes: `src-${type}${confidence >= 0.85 ? " strong" : ""}`,
+    });
+  };
+
+  for (const e of EDGES as GraphEdge[]) addEdge(e.id, e.source, e.target, e.sourceType, e.confidence);
+
+  // ghost anchors — hypotheses, drawn dashed and never as facts
+  for (const seed of GHOST_SEEDS) {
+    seed.between.forEach((b, i) => {
+      if (pos[b]) addEdge(`ghost-${seed.id}-${i}`, ghostId, b, "hypothesis", 0.4);
+    });
+  }
+
+  return { elements: els, positions: pos, satellites };
+}
+
+/* ==================================================================== *
+ * Styles
+ * ==================================================================== */
+
+const STYLE: StylesheetJson = [
+  {
+    selector: "node",
+    style: {
+      label: "data(label)",
+      "font-family": "ui-monospace, Menlo, monospace",
+      "font-size": 8,
+      color: "#AEB9C9",
+      "text-outline-color": "#0B0E13",
+      "text-outline-width": 2,
+      "text-valign": "bottom",
+      "text-halign": "center",
+      "text-margin-y": 4,
+      "min-zoomed-font-size": 6,
+      "border-width": 1,
+      "border-color": "#0B0E13",
+    },
+  },
+  /* hub chips: avatar on the left, name + number on the right */
+  {
+    selector: "node.hub",
+    style: {
+      shape: "roundrectangle",
+      width: 176,
+      height: 48,
+      "background-color": "#171C25",
+      "background-image": "data(avatar)",
+      "background-width": 36,
+      "background-height": 36,
+      "background-position-x": 7,
+      "background-position-y": "50%",
+      "background-clip": "none",
+      "border-width": 2,
+      "border-color": "#2A3340",
+      "font-family": "ui-sans-serif, system-ui, sans-serif",
+      "font-size": 10,
+      "font-weight": 700,
+      color: "#F2F6FC",
+      "text-wrap": "wrap",
+      "text-max-width": "108px",
+      "text-valign": "center",
+      "text-halign": "center",
+      "text-margin-y": 0,
+      "text-margin-x": 16,
+      "text-outline-width": 0,
+      "min-zoomed-font-size": 8,
+      "z-index": 20,
+    },
+  },
+  { selector: "node.hub.neta", style: { "border-color": "#22D3EE" } },
+  { selector: "node.hub.netb", style: { "border-color": "#F59E0B" } },
+  { selector: "node.hub.noise", style: { "border-color": "#4B5563" } },
+
+  {
+    selector: "node.ghost",
+    style: {
+      shape: "roundrectangle",
+      width: 168,
+      height: 46,
+      "background-color": "#2A1216",
+      "background-image": "data(avatar)",
+      "background-width": 34,
+      "background-height": 34,
+      "background-position-x": 6,
+      "background-position-y": "50%",
+      "background-clip": "none",
+      "border-width": 2,
+      "border-style": "dashed",
+      "border-color": "#EF4444",
+      "underlay-color": "#EF4444",
+      "underlay-opacity": 0.16,
+      "underlay-padding": 10,
+      "font-family": "ui-sans-serif, system-ui, sans-serif",
+      "font-size": 10,
+      "font-weight": 800,
+      color: "#FFD9DD",
+      "text-valign": "center",
+      "text-halign": "center",
+      "text-margin-x": 14,
+      "text-outline-width": 0,
+      "z-index": 60,
+    },
+  },
+
+  {
+    selector: "node.case",
+    style: {
+      shape: "roundrectangle",
+      width: 52,
+      height: 24,
+      "background-color": "#0F2A33",
+      "border-width": 1.5,
+      "border-color": "#22D3EE",
+      "font-size": 8,
+      "font-weight": 700,
+      color: "#9FE9F6",
+      "text-valign": "center",
+      "text-margin-y": 0,
+      "z-index": 15,
+    },
+  },
+
+  /* entity satellites */
+  { selector: "node.person", style: { width: 20, height: 20, "background-color": "#F5F7FB" } },
+  { selector: "node.phone", style: { shape: "diamond", width: 16, height: 16, "background-color": "#F59E0B" } },
+  { selector: "node.bank", style: { shape: "hexagon", width: 18, height: 16, "background-color": "#22C55E" } },
+  { selector: "node.upi", style: { shape: "star", width: 17, height: 17, "background-color": "#A3E635" } },
+  { selector: "node.alias", style: { shape: "vee", width: 18, height: 15, "background-color": "#A78BFA" } },
+  { selector: "node.location", style: { width: 12, height: 12, "background-color": "#94A3B8" } },
+
+  /* activity satellites — tiny, no label until zoomed */
+  {
+    selector: "node.activity",
+    style: {
+      shape: "ellipse",
+      width: 9,
+      height: 9,
+      "border-width": 0,
+      "font-size": 5.5,
+      color: "#7E8798",
+      "text-outline-width": 1.5,
+      "min-zoomed-font-size": 9,
+      "z-index": 3,
+    },
+  },
+  { selector: "node.act-money", style: { shape: "roundrectangle", width: 10, height: 7 } },
+  { selector: "node.act-evidence", style: { shape: "rectangle", width: 8, height: 8, opacity: 0.8 } },
+
+  /* edges */
+  {
+    selector: "edge",
+    style: {
+      width: "mapData(confidence, 0.3, 1, 0.7, 2.6)",
+      "curve-style": "bezier",
+      "line-color": "#3A4453",
+      "target-arrow-shape": "none",
+      opacity: 0.55,
+      "z-index": 1,
+    },
+  },
+  { selector: "edge.src-fir", style: { "line-color": SOURCE_COLOR.fir } },
+  { selector: "edge.src-cdr", style: { "line-color": SOURCE_COLOR.cdr } },
+  { selector: "edge.src-financial", style: { "line-color": SOURCE_COLOR.financial } },
+  { selector: "edge.src-osint", style: { "line-color": SOURCE_COLOR.osint, "line-style": "dashed" } },
+  { selector: "edge.strong", style: { opacity: 0.95, width: 2.6 } },
+  {
+    selector: "edge.src-hypothesis",
+    style: {
+      "line-color": "#EF4444",
+      "line-style": "dashed",
+      opacity: 0.6,
+      width: 1.3,
+    },
+  },
+  {
+    selector: "edge.hidden-link",
+    style: {
+      "line-color": "#A78BFA",
+      "line-style": "dashed",
+      width: 1.8,
+      opacity: 0.85,
+      "curve-style": "bezier",
+    },
+  },
+
+  /* interaction states */
+  { selector: ".dim", style: { opacity: 0.1 } },
+  {
+    selector: ".hl",
+    style: {
+      "border-width": 3,
+      "border-color": "#FF4FA3",
+      "underlay-color": "#FF4FA3",
+      "underlay-opacity": 0.28,
+      "underlay-padding": 8,
+      "z-index": 40,
+    },
+  },
+  { selector: ".searching", style: { opacity: 0.06 } },
+  { selector: ".search-hit", style: { "border-width": 3, "border-color": "#A3E635", "z-index": 45 } },
+];
+
+/* ==================================================================== *
+ * Page
+ * ==================================================================== */
+
+type Tab = "filter" | "intel" | "ghost";
+
+export default function NetworkPage() {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const cyRef = useRef<Core | null>(null);
   const [ready, setReady] = useState(false);
-  const [frozen, setFrozen] = useState<{ id: string; before: number; after: number } | null>(null);
-  const [step, setStep] = useState<number | null>(null);
-  const [searchQ, setSearchQ] = useState("");
+  const [tab, setTab] = useState<Tab>("filter");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<{ id: string; kind: string; label: string } | null>(null);
 
-  const graph = useMemo(() => deriveGraph(cases, extraEntities), [cases, extraEntities]);
-  const days = useMemo(() => timelineDays(), []);
-  const selectedDate = replayIdx === null ? days[days.length - 1] : days[replayIdx];
-  const casesAtDate = useMemo(() => casesUpToDate(cases, selectedDate), [cases, selectedDate]);
-  const analysis = useMemo(
-    () => (selection ? analyzeSelection(selection.id, casesAtDate) : null),
-    [selection, casesAtDate],
-  );
-  const story = useMemo(() => flagStory(cases), [cases]);
-  const breaches = useMemo(() => breachRanks(cases), [cases]);
+  const [showActivity, setShowActivity] = useState(true);
+  const [showCases, setShowCases] = useState(true);
+  const [netA, setNetA] = useState(true);
+  const [netB, setNetB] = useState(true);
+  const [noise, setNoise] = useState(true);
+  const [showHidden, setShowHidden] = useState(false);
+  const [showCommunities, setShowCommunities] = useState(false);
 
-  const audit = useCallback(
-    (action: string, result = "OK") =>
-      pushAudit({
-        ts: new Date().toISOString(),
-        actor: session?.badge ?? "INV-2041",
-        action,
-        result,
-      }),
-    [pushAudit, session?.badge],
-  );
+  const bundle = useMemo(() => buildGraph(), []);
+  const gnn = useMemo(() => trainGnn(NODES, EDGES, CASES), []);
+  const clusters = useMemo(() => clusterEmbeddings(gnn, 4), [gnn]);
+  const anomalies = useMemo(() => detectAnomalies(gnn, 6), [gnn]);
+  const hiddenLinks = useMemo(() => predictLinks(gnn, { limit: 8, minScore: 0.3 }), [gnn]);
+  const approved = useQuery(api.collection.approvedEntities);
 
-  /* ---------- halo hulls + ring sync (imperative, outside React state) ---------- */
+  const ghost = GHOST_SEEDS[0];
 
-  const updateHulls = useCallback(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const z = cy.zoom();
-    const p = cy.pan();
-    for (const hull of HULLS) {
-      const el = hullRefs[hull.key].current;
-      if (!el) continue;
-      const nodes = cy.nodes(`.${hull.key}`);
-      const visible = nodes.filter(n => n.style("display") !== "none");
-      if (visible.empty()) {
-        el.style.opacity = "0";
-        continue;
-      }
-      const bb = visible.boundingBox();
-      const x = bb.x1 * z + p.x - 20;
-      const y = bb.y1 * z + p.y - 30;
-      const w = bb.w * z + 40;
-      const h = bb.h * z + 60;
-      el.style.left = `${x}px`;
-      el.style.top = `${y}px`;
-      el.style.width = `${Math.max(40, w)}px`;
-      el.style.height = `${Math.max(40, h)}px`;
-      el.style.opacity = "1";
-    }
-    if (ringRef.current) {
-      ringRef.current.setAttribute("transform", `translate(${p.x} ${p.y}) scale(${z})`);
-    }
-  }, []);
-
-  /* ---------- init cytoscape once ---------- */
-
+  /* ---------------- mount cytoscape once ---------------- */
   useEffect(() => {
     if (!containerRef.current) return;
     const cy = cytoscape({
       container: containerRef.current,
-      elements: buildElements(graph.nodes, graph.edges),
-      style: CY_STYLE,
+      elements: bundle.elements,
+      style: STYLE,
       layout: {
-        name: "cose",
+        name: "preset",
+        positions: bundle.positions,
+        fit: true,
+        padding: 70,
         animate: false,
-        padding: 44,
-        idealEdgeLength: 92,
-        nodeRepulsion: 4600,
-        randomize: true,
       },
-      minZoom: 0.25,
+      wheelSensitivity: 0.22,
+      minZoom: 0.12,
       maxZoom: 3,
+      selectionType: "single",
       boxSelectionEnabled: false,
-      wheelSensitivity: 0.2,
     });
     cyRef.current = cy;
 
-    cy.on("tap", "node", evt => {
-      const id = (evt.target as cytoscape.NodeSingular).id();
-      setSelection({ type: "node", id });
+    cy.on("tap", "node", e => {
+      const d = e.target.data();
+      setSelected({
+        id: d.id,
+        kind: d.kind ?? "entity",
+        label: d.fullLabel ?? d.label ?? d.id,
+      });
+      cy.elements().removeClass("hl");
+      e.target.addClass("hl");
+      e.target.connectedEdges().addClass("hl");
     });
-    cy.on("tap", "edge", evt => {
-      const id = (evt.target as cytoscape.EdgeSingular).id();
-      setSelection({ type: "edge", id });
-    });
-    cy.on("tap", evt => {
-      if (evt.target === cy) setSelection(null);
-    });
-    cy.on("render zoom pan layoutstop", updateHulls);
-    // cose can settle outside the visible viewport, which reads as a blank
-    // graph. Fit once the layout finishes, and again after the first resize.
-    cy.one("layoutstop", () => {
-      cy.fit(undefined, 56);
-      updateHulls();
-    });
-    requestAnimationFrame(() => {
-      if (!containerRef.current) return;
-      const { offsetWidth: w, offsetHeight: h } = containerRef.current;
-      if (w > 0 && h > 0) cy.resize();
-      cy.fit(undefined, 56);
-      updateHulls();
-      setReady(true);
+    cy.on("tap", e => {
+      if (e.target === cy) {
+        cy.elements().removeClass("hl");
+        setSelected(null);
+      }
     });
 
-    const ro = new ResizeObserver(() => {
-      if (!containerRef.current) return;
-      const { offsetWidth: w, offsetHeight: h } = containerRef.current;
-      if (w === 0 || h === 0) return;
-      cy.resize();
-    });
+    const fit = () => {
+      const w = containerRef.current?.clientWidth ?? 0;
+      const h = containerRef.current?.clientHeight ?? 0;
+      if (w > 0 && h > 0) {
+        cy.resize();
+        cy.fit(undefined, 60);
+      }
+    };
+    cy.one("layoutstop", fit);
+    const ro = new ResizeObserver(fit);
     ro.observe(containerRef.current);
+    setReady(true);
 
     return () => {
       ro.disconnect();
       cy.destroy();
       cyRef.current = null;
+      setReady(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bundle]);
 
-  /* ---------- live data sync ---------- */
-
+  /* ---------------- filters ---------------- */
   useEffect(() => {
     const cy = cyRef.current;
-    if (!cy) return;
-    const els = buildElements(graph.nodes, graph.edges);
-    if (cy.elements().length === els.length) return;
-    cy.elements().remove();
-    cy.add(els);
-    cy.layout({ name: "cose", animate: false, padding: 44 }).run();
-    cy.fit(undefined, 56);
-    audit("network.reload", `${graph.nodes.length} nodes`);
-  }, [graph, audit]);
-
-  /* ---------- layer + time filters ---------- */
-
-  const applyFilters = useCallback(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    cy.batch(() => {
-      cy.edges().forEach(e => {
-        const st = e.data("sourceType") as SourceType;
-        const visible = layers[st] !== false && e.data("date") <= selectedDate;
-        e.style("display", visible ? "element" : "none");
-      });
-      cy.nodes().forEach(n => {
-        if (n.data("kind") === "case") {
-          n.style("display", n.data("date") <= selectedDate ? "element" : "none");
-        }
-      });
-      cy.nodes().forEach(n => {
-        if (n.data("kind") !== "entity") return;
-        const anyVisible = n
-          .connectedEdges()
-          .some(e => e.style("display") !== "none" && e.style("opacity") !== "0.06");
-        n.style("display", anyVisible ? "element" : "none");
-      });
-    });
-    updateHulls();
-  }, [layers, selectedDate, updateHulls]);
-
-  useEffect(() => {
-    applyFilters();
-  }, [applyFilters]);
-
-  /* ---------- highlight from a freshly registered case ---------- */
-
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    cy.elements().removeClass("hl");
-    const net = params.get("net");
-    if (net) {
-      const nodes = cy.nodes(`.${netClass(net)}`);
-      nodes.addClass("hl");
-      if (!nodes.empty()) cy.animate({ fit: { eles: nodes, padding: 80 }, duration: 600 });
-      return;
-    }
-    if (!highlightPhones?.length) return;
-    const targets = cy.nodes().filter(n =>
-      highlightPhones.some(p => String(n.data("fullLabel") ?? "").includes(p)),
-    );
-    targets.addClass("hl");
-    if (!targets.empty()) {
-      cy.animate({ fit: { eles: targets, padding: 70 }, duration: 700 });
-      audit("network.highlight", highlightPhones.join(","));
-    }
-  }, [highlightPhones, cases, params, audit]);
-
-  /* ---------- search dimming ---------- */
-
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    cy.nodes().removeClass("dim");
-    if (!searchQ.trim()) return;
-    const q = searchQ.trim().toLowerCase();
-    const matches = cy.nodes().filter(
-      n =>
-        String(n.data("label") ?? "").toLowerCase().includes(q) ||
-        String(n.data("fullLabel") ?? "").toLowerCase().includes(q),
-    );
-    cy.nodes().not(matches).addClass("dim");
-    if (!matches.empty()) cy.animate({ fit: { eles: matches, padding: 80 }, duration: 500 });
-  }, [searchQ]);
-
-  /* ---------- replay autoplay ---------- */
-
-  useEffect(() => {
-    if (!playing) return;
-    if (replayIdx === null) {
-      setPlaying(false);
-      return;
-    }
-    if (replayIdx >= days.length - 1) {
-      setPlaying(false);
-      return;
-    }
-    const id = window.setTimeout(
-      () => setReplayIdx(i => (i === null ? 0 : i + 1)),
-      RM() ? 40 : 620,
-    );
-    return () => window.clearTimeout(id);
-  }, [playing, replayIdx, days.length]);
-
-  /* ---------- spiral layout ---------- */
-
-  const applySpiral = useCallback(
-    (on: boolean) => {
-      const cy = cyRef.current;
-      if (!cy) return;
-      if (on) {
-        const { positions, guides } = spiralLayout(
-          graph.nodes,
-          cases,
-          cy.width(),
-          cy.height(),
-        );
-        setRings(guides);
-        cy.batch(() => {
-          cy.nodes().forEach(n => {
-            const p = positions.get(n.id());
-            if (!p) return;
-            n.animate(
-              { position: p },
-              { duration: RM() ? 0 : 1000, easing: "ease-out-cubic", queue: false },
-            );
-          });
-        });
-        setSpiral(true);
-        audit("network.spiral", "chakravyuh view");
-      } else {
-        setRings([]);
-        setSpiral(false);
-        setStep(null);
-        cy.layout({ name: "cose", animate: !RM(), animationDuration: 900, padding: 44 }).run();
-        audit("network.layout", "cose");
-      }
-    },
-    [graph.nodes, cases, audit],
-  );
-
-  /* ---------- labyrinth walkthrough ---------- */
-
-  const applyStep = useCallback(
-    (i: number | null) => {
-      const cy = cyRef.current;
-      if (!cy) return;
+    if (!cy || !ready) return;
+    const apply = () => {
       cy.batch(() => {
-        cy.elements().removeClass("step-on step-dim");
-        if (i === null) return;
-        const s = LABYRINTH_STEPS[i];
         cy.nodes().forEach(n => {
-          const stub = {
-            id: n.id(),
-            network: n.data("network"),
-            kind: n.data("kind"),
-          } as unknown as GraphNode;
-          if (s.match(stub)) n.addClass("step-on");
-          else n.addClass("step-dim");
+          const kind = n.data("kind") as string;
+          const net = n.data("network") as string;
+          let visible = true;
+          if (kind === "activity" && !showActivity) visible = false;
+          if (kind === "case" && !showCases) visible = false;
+          if (net === "NET-A" && !netA) visible = false;
+          if (net === "NET-B" && !netB) visible = false;
+          if (net === "NOISE" && !noise) visible = false;
+          n.style("display", visible ? "element" : "none");
         });
         cy.edges().forEach(e => {
-          if (e.source().hasClass("step-on") && e.target().hasClass("step-on")) {
-            e.removeClass("step-dim");
-            if (i === 2) e.addClass("hl");
-          } else {
-            e.addClass("step-dim");
-          }
+          const endsVisible =
+            e.source().style("display") !== "none" && e.target().style("display") !== "none";
+          e.style("display", endsVisible ? "element" : "none");
         });
       });
-      const on = cy.nodes(".step-on");
-      if (!on.empty()) {
-        cy.animate({ fit: { eles: on, padding: 90 }, duration: RM() ? 0 : 700 });
-      }
-    },
-    [],
-  );
+    };
+    apply();
+  }, [ready, showActivity, showCases, netA, netB, noise]);
 
-  const nextStep = () => {
-    if (step === null) return;
-    if (step >= LABYRINTH_STEPS.length - 1) {
-      setStep(null);
-      applyStep(null);
-      audit("labyrinth.exit");
-      return;
-    }
-    const n = step + 1;
-    setStep(n);
-    applyStep(n);
-    audit("labyrinth.step", LABYRINTH_STEPS[n].label);
-  };
-
-  /* ---------- analyze sequence ---------- */
-
-  const runAnalyze = async () => {
+  /* ---------------- hidden-link overlay ---------------- */
+  useEffect(() => {
     const cy = cyRef.current;
-    if (!cy || analyzing) return;
-    setAnalyzing(true);
-    setSelection(null);
-    setStep(null);
-    applyStep(null);
-    audit("network.analyze", "reveal started");
-
-    const snapshot = cy.elements().jsons() as cytoscape.ElementDefinition[];
-    const nodeDefs = snapshot.filter(el => el.group === "nodes");
-    const edgeDefs = snapshot.filter(el => el.group === "edges");
-
-    cy.edges().remove();
-    cy.nodes("node.entity").remove();
-    cy.layout({ name: "cose", animate: !RM(), animationDuration: 700, padding: 70 }).run();
-    await sleep(RM() ? 30 : 650);
-
-    const shared = nodeDefs.filter(
-      el => String(el.data.caseIds ?? "").split(",").filter(Boolean).length > 1,
-    );
-    const rest = nodeDefs.filter(el => !shared.includes(el));
-
-    for (const el of shared) {
-      if (RM()) break;
-      cy.add(el);
-      const node = cy.getElementById(String(el.data.id));
-      node.style({
-        "underlay-color": "#FF4FA3",
-        "underlay-opacity": 0.85,
-        "underlay-padding": 14,
+    if (!cy || !ready) return;
+    cy.elements(".hidden-link").remove();
+    if (!showHidden) return;
+    const adds: ElementDefinition[] = [];
+    for (const l of hiddenLinks) {
+      if (!cy.getElementById(l.a).nonempty() || !cy.getElementById(l.b).nonempty()) continue;
+      adds.push({
+        group: "edges",
+        data: {
+          id: `hl-${l.a}-${l.b}`,
+          source: l.a,
+          target: l.b,
+          sourceType: "hidden",
+          confidence: l.score,
+          label: `${(l.score * 100).toFixed(0)}%`,
+        },
+        classes: "hidden-link",
       });
-      window.setTimeout(() => {
-        node.removeStyle("underlay-color");
-        node.removeStyle("underlay-opacity");
-        node.removeStyle("underlay-padding");
-      }, 700);
-      await sleep(170);
     }
-    for (const el of shared) if (cy.getElementById(String(el.data.id)).empty()) cy.add(el);
-    for (const el of rest) cy.add(el);
-    for (const el of edgeDefs) {
-      if (!cy.getElementById(String(el.data.id)).empty()) continue;
-      const src = cy.getElementById(String(el.data.source));
-      const tgt = cy.getElementById(String(el.data.target));
-      if (!src.empty() && !tgt.empty()) cy.add(el);
-    }
+    cy.add(adds);
+  }, [ready, showHidden, hiddenLinks]);
 
-    await sleep(RM() ? 30 : 320);
-    cy.layout({
-      name: "cose",
-      animate: !RM(),
-      animationDuration: 1100,
-      padding: 48,
-      nodeRepulsion: 4600,
-    }).run();
-    applyFilters();
-    setAnalyzing(false);
-    audit("network.analyze", "clusters formed");
-  };
-
-  /* ---------- breach / freeze ---------- */
-
-  const freeze = (rank: BreachRank) => {
+  /* ---------------- community colouring ---------------- */
+  useEffect(() => {
     const cy = cyRef.current;
-    if (!cy) return;
-    cy.elements().removeClass("frozen frozen-edge");
-    cy.nodes().forEach(n => {
-      if (n.data("kind") === "case") n.removeStyle("background-color");
-    });
-
-    const node = cy.getElementById(rank.nodeId);
-    if (node.empty()) return;
-    node.addClass("frozen");
-    node.connectedEdges().addClass("frozen-edge");
-
-    const comps = componentsFor(cases, rank.nodeId);
-    const cx = cy.width() / 2;
-    const cyMid = cy.height() / 2;
-
-    comps.forEach((comp, ci) => {
-      const angle = (ci / Math.max(1, comps.length)) * Math.PI * 2 - Math.PI / 2;
-      const ox = cx + Math.cos(angle) * 250;
-      const oy = cyMid + Math.sin(angle) * 200;
-      comp.forEach((caseId, k) => {
-        const n = cy.getElementById(caseId);
-        if (n.empty()) return;
-        n.style("background-color", FRAGMENT_COLORS[ci % FRAGMENT_COLORS.length]);
-        const a = (k / Math.max(1, comp.length)) * Math.PI * 2;
-        n.animate(
-          { position: { x: ox + Math.cos(a) * 78, y: oy + Math.sin(a) * 64 } },
-          { duration: RM() ? 0 : 900, easing: "ease-out-cubic", queue: false },
-        );
+    if (!cy || !ready) return;
+    const palette = ["#22D3EE", "#F59E0B", "#A78BFA", "#34D399"];
+    cy.nodes().removeStyle("border-color");
+    if (!showCommunities) return;
+    cy.batch(() => {
+      clusters.forEach((c: Cluster, i: number) => {
+        for (const m of c.members) {
+          const n = cy.getElementById(m.id);
+          if (n.nonempty()) n.style("border-color", palette[i % palette.length]);
+        }
       });
     });
-    node.animate(
-      { position: { x: cx, y: cyMid } },
-      { duration: RM() ? 0 : 900, easing: "ease-out-cubic", queue: false },
+  }, [ready, showCommunities, clusters]);
+
+  /* ---------------- search ---------------- */
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || !ready) return;
+    cy.elements().removeClass("searching search-hit");
+    const q = query.trim().toLowerCase();
+    if (!q) return;
+    const hits = cy.nodes().filter(n =>
+      `${n.data("fullLabel") ?? ""} ${n.data("label") ?? ""} ${n.data("sub") ?? ""}`
+        .toLowerCase()
+        .includes(q),
     );
+    cy.elements().addClass("searching");
+    hits.removeClass("searching").addClass("search-hit");
+    hits.connectedEdges().removeClass("searching");
+    if (hits.length) cy.animate({ fit: { eles: hits, padding: 120 } }, { duration: 300 });
+  }, [ready, query]);
 
-    setFrozen({
-      id: rank.nodeId,
-      before: 1,
-      after: rank.netFragments > 1 ? rank.netFragments : rank.fragments,
-    });
-    audit("breach.freeze", `${rank.label} → ${comps.length} fragments`);
-  };
-
-  const restore = () => {
+  const focusNode = useCallback((id: string) => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.elements().removeClass("frozen frozen-edge");
-    cy.nodes().forEach(n => {
-      if (n.data("kind") === "case") n.removeStyle("background-color");
-    });
-    setFrozen(null);
-    if (spiral) applySpiral(true);
-    else cy.layout({ name: "cose", animate: !RM(), animationDuration: 800, padding: 44 }).run();
-    audit("breach.restore");
-  };
+    const n = cy.getElementById(id);
+    if (!n.nonempty()) return;
+    cy.animate({ center: { eles: n }, zoom: 1.15 }, { duration: 320 });
+    cy.elements().removeClass("hl");
+    n.addClass("hl");
+    setSelected({ id, kind: n.data("kind"), label: n.data("fullLabel") ?? n.data("label") });
+  }, []);
 
-  const visibleEdges = useMemo(() => {
-    return Math.max(0, days.length - 1);
-  }, [days.length]);
-  void visibleEdges;
+  const counts = useMemo(() => {
+    const nodes = bundle.elements.filter(e => e.group === "nodes");
+    return {
+      cases: nodes.filter(n => (n.data as { kind?: string }).kind === "case").length,
+      people: nodes.filter(n => (n.data as { kind?: string }).kind === "hub").length,
+      instruments: nodes.filter(n =>
+        ["phone", "bank", "upi", "alias"].includes((n.data as { type?: string }).type ?? ""),
+      ).length,
+      activity: bundle.satellites,
+      edges: bundle.elements.filter(e => e.group === "edges").length,
+    };
+  }, [bundle]);
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] min-h-[560px] gap-4">
-      {/* ---------------- graph ---------------- */}
-      <div className="relative min-w-0 flex-1 overflow-hidden rounded-2xl border border-white/8 bg-[#070910]/70">
-        {/* rings + hulls behind the canvas */}
-        <div className="pointer-events-none absolute inset-0 z-0">
-          {rings.length > 0 && (
-            <svg className="absolute inset-0 h-full w-full">
-              <g ref={ringRef}>
-                <circle
-                  cx={containerRef.current ? 0 : 0}
-                  cy={0}
-                  r={0}
-                  fill="none"
-                  stroke="none"
-                />
-                <SpiralRings rings={rings} />
-              </g>
-            </svg>
-          )}
-          {HULLS.map(h => (
-            <div
-              key={h.key}
-              ref={hullRefs[h.key]}
-              className="absolute rounded-[46px] border border-dashed opacity-0 transition-opacity duration-500"
-              style={{
-                borderColor: `${h.color}38`,
-                background: `radial-gradient(60% 60% at 50% 50%, ${h.color}14, transparent 70%)`,
-              }}
-            >
-              <span
-                className="mono absolute -top-2 left-3 rounded-full px-2 text-[9px] font-bold tracking-[0.22em]"
-                style={{ color: h.color, background: "#070910" }}
-              >
-                {h.label}
-              </span>
-            </div>
-          ))}
+    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden">
+      {/* ---------------- toolbar ---------------- */}
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-white/8 bg-[#0B0E14] px-4 py-2.5">
+        <span className="mono inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-[10px] font-bold tracking-[0.14em] text-white/70">
+          <Waypoints className="h-3.5 w-3.5 text-[#22D3EE]" /> NETWORK INTELLIGENCE
+        </span>
+        <span className="mono hidden rounded-lg border border-white/8 px-3 py-1.5 text-[10px] text-white/40 sm:inline">
+          10 Jun – 28 Jun 2026
+        </span>
+
+        <div className="relative ml-auto">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/35" />
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Find an entity…"
+            className="mono w-52 rounded-lg border border-white/10 bg-black/40 py-1.5 pl-8 pr-3 text-[11px] text-white/80 outline-none placeholder:text-white/25 focus:border-[#22D3EE]/50"
+          />
         </div>
-
-        <div ref={containerRef} className="absolute inset-0 z-10" />
-
-        {/* graph mount / layout state */}
-        {!ready && (
-          <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-[#070910]/85">
-            <div className="flex flex-col items-center gap-4">
-              <div className="relative h-12 w-12">
-                <span className="absolute inset-0 rounded-full border border-[#22D3EE]/25" />
-                <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-[#22D3EE]" />
-                <span className="absolute inset-2 rounded-full border border-[#A78BFA]/30 animate-pulse" />
-              </div>
-              <p className="mono text-[11px] tracking-[0.28em] text-[#22D3EE]">
-                RESOLVING ENTITIES
-              </p>
-              <p className="mono text-[9px] tracking-[0.2em] text-white/30">
-                COSE LAYOUT · {graph.nodes.length} NODES · {graph.edges.length} EDGES
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* toolbar */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-start gap-2 p-3">
-          <div className="pointer-events-auto flex flex-wrap items-center gap-2">
-            <button
-              onClick={runAnalyze}
-              disabled={analyzing}
-              className="mono inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#22D3EE] to-[#A78BFA] px-4 py-2 text-[10px] font-bold tracking-[0.14em] text-[#041018] transition hover:opacity-90 disabled:opacity-60"
-            >
-              {analyzing ? <Sparkles className="h-3.5 w-3.5 animate-pulse" /> : <Waypoints className="h-3.5 w-3.5" />}
-              {analyzing ? "ANALYZING…" : "ANALYZE NETWORK"}
-            </button>
-
-            <button onClick={() => applySpiral(!spiral)} className={TOOLBTN}>
-              <Compass className="h-3.5 w-3.5" />
-              {spiral ? "COSE VIEW" : "CHAKRAVYUH VIEW"}
-            </button>
-
-            {spiral && (
-              <button
-                onClick={() => {
-                  if (step === null) {
-                    setStep(0);
-                    applyStep(0);
-                    audit("labyrinth.enter");
-                  } else {
-                    nextStep();
-                  }
-                }}
-                className="mono inline-flex items-center gap-2 rounded-full border border-[#FF4FA3]/50 bg-[#FF4FA3]/10 px-3.5 py-2 text-[10px] font-bold tracking-[0.14em] text-[#FF4FA3] transition hover:bg-[#FF4FA3]/20"
-              >
-                <Snowflake className="h-3.5 w-3.5" />
-                {step === null ? "ENTER THE LABYRINTH" : step >= LABYRINTH_STEPS.length - 1 ? "EXIT" : "DEEPER →"}
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                setBreachOpen(v => !v);
-                setFrozen(null);
-                audit("breach.scan");
-              }}
-              className={TOOLBTN}
-            >
-              <Waypoints className="h-3.5 w-3.5" />
-              FIND BREACH POINTS
-            </button>
-
-            <div className="pointer-events-auto relative">
-              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/35" />
-              <input
-                value={searchQ}
-                onChange={e => setSearchQ(e.target.value)}
-                placeholder="find node…"
-                className="mono h-9 w-40 rounded-full border border-white/12 bg-[#0B0F1A]/85 pl-9 pr-3 text-[11px] text-white/85 placeholder:text-white/30 focus:border-[#22D3EE]/60 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* layer toggles */}
-          <div className="pointer-events-auto ml-auto flex items-center gap-1.5 rounded-full border border-white/12 bg-[#0B0F1A]/85 px-3 py-2 backdrop-blur">
-            <Sliders className="mr-1 h-3.5 w-3.5 text-white/35" />
-            {LAYER_META.map(l => (
-              <button
-                key={l.key}
-                onClick={() => setLayers(prev => ({ ...prev, [l.key]: !prev[l.key] }))}
-                className="mono rounded-full border px-2.5 py-1 text-[9px] font-bold tracking-[0.14em] transition"
-                style={{
-                  borderColor: layers[l.key] ? l.color : "rgba(255,255,255,0.12)",
-                  color: layers[l.key] ? l.color : "rgba(255,255,255,0.3)",
-                  background: layers[l.key] ? `${l.color}18` : "transparent",
-                }}
-              >
-                {l.label.toUpperCase()}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* breach panel */}
-        <AnimatePresence>
-          {breachOpen && (
-            <motion.div
-              initial={{ opacity: 0, x: -24 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -24 }}
-              className="absolute left-3 top-20 z-20 w-[300px] rounded-2xl border border-white/10 bg-[#070910]/95 p-4 backdrop-blur-xl"
-            >
-              <div className="flex items-center justify-between">
-                <p className="mono text-[10px] font-bold tracking-[0.2em] text-[#22D3EE]">
-                  BREACH POINTS
-                </p>
-                <span className="mono text-[9px] text-white/30">RANKED</span>
-              </div>
-
-              {frozen ? (
-                <div className="mt-3">
-                  <p className="text-sm font-semibold text-white">
-                    {analysis ? "" : ""}
-                    <span className="mono text-[11px] text-[#93C5FD]">
-                      {frozen.id.toUpperCase()} FROZEN
-                    </span>
-                  </p>
-                  <p className="mono mt-2 text-[10px] leading-5 tracking-wide text-white/50">
-                    BEFORE {frozen.before} NETWORK → AFTER {frozen.after} FRAGMENTS
-                  </p>
-                  <button
-                    onClick={restore}
-                    className="mono mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 py-2 text-[10px] font-bold tracking-[0.14em] text-white/70 transition hover:border-white/35 hover:text-white"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" /> RESTORE
-                  </button>
-                  <p className="mono mt-2 text-[9px] leading-4 text-white/35">
-                    PRIORITIES FOR HUMAN REVIEW, NOT TARGETS.
-                  </p>
-                </div>
-              ) : (
-                <ul className="mt-3 space-y-1.5">
-                  {breaches.slice(0, 6).map((b, i) => (
-                    <li key={b.nodeId}>
-                      <button
-                        onClick={() => freeze(b)}
-                        className="flex w-full items-center gap-2 rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2 text-left transition hover:border-[#22D3EE]/40 hover:bg-white/[0.06]"
-                      >
-                        <span className="mono w-4 text-[10px] text-white/30">
-                          {String(i + 1).padStart(2, "0")}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="mono block truncate text-[11px] text-white/85">
-                            {b.label}
-                          </span>
-                          <span className="mono block text-[9px] tracking-wider text-white/35">
-                            {b.type.toUpperCase()} · −{b.pairsLost} LINKS
-                          </span>
-                        </span>
-                        <span
-                          className={`mono text-[10px] font-bold ${
-                            b.fragmentsDelta > 0 ? "text-[#F59E0B]" : "text-white/20"
-                          }`}
-                          title={`splits the graph into ${b.fragmentsDelta + 1} piece${
-                            b.fragmentsDelta === 0 ? "" : "s"
-                          }`}
-                        >
-                          {b.fragmentsDelta > 0 ? `⇩${b.fragmentsDelta + 1}` : "—"}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* labyrinth caption */}
-        <AnimatePresence>
-          {step !== null && step < LABYRINTH_STEPS.length && (
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 18 }}
-              className="absolute bottom-24 left-3 z-20 w-[330px] rounded-2xl border border-[#FF4FA3]/30 bg-[#070910]/95 p-4 backdrop-blur-xl"
-            >
-              <p className="mono text-[10px] font-bold tracking-[0.24em] text-[#FF4FA3]">
-                LAYER {step + 1} / {LABYRINTH_STEPS.length} · {LABYRINTH_STEPS[step].label.toUpperCase()}
-              </p>
-              <p className="mt-2 text-[12px] leading-5 text-white/65">
-                {LABYRINTH_STEPS[step].caption}
-              </p>
-              {step === 2 && (
-                <p className="mono mt-2 text-[9px] tracking-wide text-[#22D3EE]">
-                  EXIT VECTOR: MULE ACCOUNT XXXX3310 IS THE ONE EDGE THAT JOINS BOTH
-                  RINGS.
-                </p>
-              )}
-              <button
-                onClick={nextStep}
-                className="mono mt-3 w-full rounded-full border border-white/15 py-2 text-[10px] font-bold tracking-[0.14em] text-white/75 transition hover:border-white/35 hover:text-white"
-              >
-                {step >= LABYRINTH_STEPS.length - 1 ? "EXIT THE LABYRINTH" : "GO DEEPER →"}
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* legend */}
-        <div className="absolute bottom-24 right-3 z-20 rounded-2xl border border-white/10 bg-[#070910]/90 p-3 backdrop-blur-xl">
-          <p className="mono mb-2 text-[9px] font-bold tracking-[0.22em] text-white/40">LEGEND</p>
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-            {Object.entries(NODE_VISUALS).map(([key, v]) => (
-              <li key={key} className="flex items-center gap-2">
-                <span
-                  className="h-2.5 w-2.5 shrink-0"
-                  style={{
-                    background: v.color,
-                    clipPath:
-                      v.shape === "diamond"
-                        ? "polygon(50% 0,100% 50%,50% 100%,0 50%)"
-                        : v.shape === "hexagon"
-                          ? "polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)"
-                          : v.shape === "roundrectangle"
-                            ? "inset(0 round 2px)"
-                            : v.shape === "vee"
-                              ? "polygon(50% 0,100% 100%,50% 78%,0 100%)"
-                              : "circle(50%)",
-                  }}
-                />
-                <span className="mono text-[9px] tracking-wider text-white/55">{v.label}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-2 flex flex-wrap gap-2 border-t border-white/8 pt-2">
-            {LAYER_META.map(l => (
-              <span key={l.key} className="flex items-center gap-1.5">
-                <span className="inline-block h-px w-4" style={{ background: l.color }} />
-                <span className="mono text-[9px] tracking-wider text-white/55">{l.label}</span>
-              </span>
-            ))}
-          </div>
-          <p className="mono mt-2 max-w-[190px] text-[8px] leading-3 tracking-wide text-white/30">
-            EDGE WIDTH = CONFIDENCE · EDGE COLOUR = SOURCE
-          </p>
-        </div>
-
-        {/* replay bar */}
-        <div className="absolute inset-x-3 bottom-3 z-20 rounded-2xl border border-white/10 bg-[#070910]/95 p-3 backdrop-blur-xl">
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => {
-                if (replayIdx === null) setReplayIdx(0);
-                setPlaying(p => !p);
-              }}
-              className="mono inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#22D3EE]/45 bg-[#22D3EE]/12 text-[#22D3EE] transition hover:bg-[#22D3EE]/25"
-              aria-label="Play replay"
-            >
-              {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            </button>
-
-            <div className="flex min-w-[220px] flex-1 items-center gap-3">
-              <span className="mono text-[10px] text-white/45">10 JUN</span>
-              <input
-                type="range"
-                min={0}
-                max={days.length - 1}
-                value={replayIdx ?? days.length - 1}
-                onChange={e => {
-                  setReplayIdx(Number(e.target.value));
-                  setPlaying(false);
-                }}
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/12 accent-[#22D3EE]"
-              />
-              <span className="mono text-[10px] text-white/45">28 JUN</span>
-            </div>
-
-            <span className="mono rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-[10px] tracking-widest text-white/70">
-              AS OF {selectedDate.slice(8, 10)} JUN 2026
-            </span>
-          </div>
-
-          <p className="mt-2 text-[11px] leading-5 text-white/45">
-            <span className="text-white/80">
-              CHAKRAVYUH would have flagged this network {story.daysBeforeLast} days
-              before the last linked FIR
-            </span>{" "}
-            ({story.lastFir}), across {story.statesAtFlag} states — on {story.flagDate}.
-          </p>
-        </div>
+        <button
+          onClick={() => cyRef.current?.fit(undefined, 60)}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/50 transition hover:text-white"
+          aria-label="Fit graph"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
       </div>
 
-      {/* ---------------- intelligence panel ---------------- */}
-      <AnimatePresence>
-        {selection && (
-          <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 400, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ type: "spring", damping: 30, stiffness: 260 }}
-            className="relative hidden shrink-0 overflow-hidden lg:block"
-          >
-            <IntelPanel
-              analysis={analysis}
-              onClose={() => setSelection(null)}
-              onAudit={action => audit(action, selection.id)}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* small-screen panel */}
-      {selection && (
-        <div className="fixed inset-0 z-40 flex justify-end lg:hidden">
-          <button
-            className="absolute inset-0 bg-black/60"
-            onClick={() => setSelection(null)}
-            aria-label="Close panel"
+      <div className="relative flex min-h-0 flex-1">
+        {/* ---------------- canvas ---------------- */}
+        <div className="relative min-w-0 flex-1">
+          <div
+            ref={containerRef}
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(120% 90% at 50% 0%, #1A1E26 0%, #12151B 55%, #0D1015 100%)",
+            }}
           />
-          <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            className="relative h-full w-[min(420px,100%)]"
-          >
-            <IntelPanel
-              analysis={analysis}
-              onClose={() => setSelection(null)}
-              onAudit={action => audit(action, selection.id)}
-            />
-          </motion.div>
+          {!ready && (
+            <div className="absolute inset-0 flex items-center justify-center text-xs text-white/40">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Building graph…
+            </div>
+          )}
+
+          {/* legend */}
+          <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap gap-3 rounded-lg border border-white/8 bg-black/55 px-3 py-2 backdrop-blur">
+            {[
+              { c: "#F5F7FB", l: "person" },
+              { c: "#F59E0B", l: "phone" },
+              { c: "#22C55E", l: "account" },
+              { c: "#A3E635", l: "upi" },
+              { c: "#A78BFA", l: "alias" },
+              { c: "#94A3B8", l: "place" },
+              { c: "#22D3EE", l: "case" },
+            ].map(x => (
+              <span key={x.l} className="mono flex items-center gap-1.5 text-[9px] text-white/45">
+                <span className="h-2 w-2 rounded-full" style={{ background: x.c }} />
+                {x.l}
+              </span>
+            ))}
+          </div>
+
+          {selected && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="absolute bottom-3 right-3 w-64 rounded-xl border border-white/10 bg-[#0B0F16]/95 p-3 backdrop-blur"
+            >
+              <p className="mono text-[9px] tracking-[0.2em] text-white/35 uppercase">
+                {selected.kind}
+              </p>
+              <p className="mt-1 truncate text-[13px] font-semibold text-white/90">{selected.label}</p>
+              <p className="mono mt-1 text-[9.5px] text-white/35">id {selected.id}</p>
+              <Explanation id={selected.id} anomalies={anomalies} />
+            </motion.div>
+          )}
         </div>
-      )}
+
+        {/* ---------------- right panel ---------------- */}
+        <aside className="w-[19rem] shrink-0 overflow-y-auto border-l border-white/8 bg-[#0B0E14]">
+          <div className="mono flex border-b border-white/8 text-[9.5px] tracking-[0.16em] uppercase">
+            {(["filter", "intel", "ghost"] as Tab[]).map(t => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`flex-1 px-2 py-2.5 transition ${
+                  tab === t
+                    ? "border-b-2 border-[#F59E0B] text-white"
+                    : "text-white/35 hover:text-white/60"
+                }`}
+              >
+                {t === "ghost" ? "Ghost" : t}
+              </button>
+            ))}
+          </div>
+
+          {tab === "filter" && (
+            <div className="divide-y divide-white/6">
+              <Section title="Nodes" count={counts.cases + counts.people + counts.instruments + counts.activity}>
+                <Toggle label="Case nodes" n={counts.cases} on={showCases} set={setShowCases} />
+                <Toggle label="People (hubs)" n={counts.people} on onToggleLocked />
+                <Toggle label="Instruments" n={counts.instruments} on onToggleLocked />
+                <Toggle label="Activity records" n={counts.activity} on={showActivity} set={setShowActivity} />
+              </Section>
+              <Section title="Networks" count={3}>
+                <Toggle label="NET-A" n={counts.people} on={netA} set={setNetA} dot="#22D3EE" />
+                <Toggle label="NET-B" n={0} on={netB} set={setNetB} dot="#F59E0B" />
+                <Toggle label="Noise / unaligned" n={0} on={noise} set={setNoise} dot="#64748B" />
+              </Section>
+              <Section title="Relationship sources" count={4}>
+                {(["fir", "cdr", "financial", "osint"] as const).map(k => (
+                  <div key={k} className="flex items-center justify-between px-3 py-1.5">
+                    <span className="mono flex items-center gap-2 text-[10px] text-white/55">
+                      <span className="h-1.5 w-4 rounded" style={{ background: SOURCE_COLOR[k] }} />
+                      {k.toUpperCase()}
+                    </span>
+                    <span className="mono text-[9px] text-white/25">on</span>
+                  </div>
+                ))}
+              </Section>
+              <Section title="Overlays" count={2}>
+                <Toggle label="Predicted hidden links" n={hiddenLinks.length} on={showHidden} set={setShowHidden} accent="#A78BFA" />
+                <Toggle label="Detected communities" n={clusters.length} on={showCommunities} set={setShowCommunities} accent="#34D399" />
+              </Section>
+              <p className="px-3 py-3 text-[10px] leading-relaxed text-white/30">
+                {counts.edges} recorded relationships across {counts.cases} FIRs. Activity records are
+                real CDR and transaction rows, not decorative filler.
+              </p>
+            </div>
+          )}
+
+          {tab === "intel" && (
+            <div className="divide-y divide-white/6">
+              <Section title="Cross-case entities" count={crossCase().length}>
+                {crossCase().slice(0, 8).map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => focusNode(c.id)}
+                    className="flex w-full items-center justify-between px-3 py-1.5 text-left transition hover:bg-white/4"
+                  >
+                    <span className="mono truncate text-[10px] text-white/65">{c.label}</span>
+                    <span className="mono shrink-0 text-[9px] text-[#22D3EE]">{c.cases} FIRs</span>
+                  </button>
+                ))}
+              </Section>
+              <Section title="Hidden links" count={hiddenLinks.length}>
+                {hiddenLinks.slice(0, 5).map(l => (
+                  <div key={`${l.a}-${l.b}`} className="px-3 py-1.5">
+                    <p className="mono truncate text-[10px] text-white/65">
+                      {l.aLabel} ↔ {l.bLabel}
+                    </p>
+                    <p className="mono text-[9px] text-[#A78BFA]">
+                      {(l.score * 100).toFixed(0)}% · {l.request}
+                    </p>
+                  </div>
+                ))}
+              </Section>
+              <Section title="Communities" count={clusters.length}>
+                {clusters.map((c, i) => (
+                  <div key={c.id} className="flex items-center justify-between px-3 py-1.5">
+                    <span className="mono flex items-center gap-2 text-[10px] text-white/60">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ background: ["#22D3EE", "#F59E0B", "#A78BFA", "#34D399"][i % 4] }}
+                      />
+                      {c.majority}
+                    </span>
+                    <span className="mono text-[9px] text-white/35">
+                      {c.members.length} · purity {c.purity.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </Section>
+              <Section title="Risk indicators" count={anomalies.length}>
+                {anomalies.slice(0, 4).map(a => (
+                  <button
+                    key={a.id}
+                    onClick={() => focusNode(a.id)}
+                    className="w-full px-3 py-1.5 text-left transition hover:bg-white/4"
+                  >
+                    <p className="mono truncate text-[10px] text-white/65">{a.label}</p>
+                    <p className="mono text-[9px] leading-snug text-white/30">{a.note}</p>
+                  </button>
+                ))}
+              </Section>
+            </div>
+          )}
+
+          {tab === "ghost" && (
+            <div className="p-3">
+              <div className="rounded-xl border border-[#EF4444]/35 bg-[#EF4444]/8 p-3">
+                <div className="flex items-center gap-2">
+                  <Ghost className="h-4 w-4 text-[#EF4444]" />
+                  <span className="mono text-[9.5px] font-bold tracking-[0.18em] text-[#EF4444]">
+                    GHOST NODE · PRIORITY
+                  </span>
+                </div>
+                <p className="mt-2 text-[12px] font-semibold text-white/90">{ghost.title}</p>
+                <p className="mono mt-1 text-[9.5px] text-white/40">
+                  {ghost.kind} · confidence {ghost.confidence}%
+                </p>
+                <p className="mt-2 text-[10.5px] leading-relaxed text-white/55">{ghost.reason}</p>
+                <button
+                  onClick={() => focusNode("GHOST")}
+                  className="mono mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[#EF4444]/40 bg-[#EF4444]/12 py-1.5 text-[9px] font-bold tracking-[0.16em] text-[#EF4444] transition hover:bg-[#EF4444]/22"
+                >
+                  <Crosshair className="h-3 w-3" /> CENTRE ON GHOST
+                </button>
+              </div>
+
+              <p className="mono mt-4 text-[9px] tracking-[0.2em] text-white/30 uppercase">
+                Next collection step
+              </p>
+              <div className="mt-1.5 rounded-lg border border-white/8 bg-black/30 p-2.5">
+                <p className="text-[10.5px] text-white/70">{ghost.lead.request}</p>
+                <p className="mono mt-1 text-[9px] text-white/35">{ghost.lead.window}</p>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-white/45">{ghost.lead.payoff}</p>
+              </div>
+
+              <p className="mono mt-4 text-[9px] tracking-[0.2em] text-white/30 uppercase">
+                Other hypotheses
+              </p>
+              <div className="mt-1.5 space-y-1.5">
+                {GHOST_SEEDS.slice(1).map(g => (
+                  <div key={g.id} className="rounded-lg border border-white/8 bg-black/25 p-2.5">
+                    <p className="text-[10.5px] font-semibold text-white/75">{g.title}</p>
+                    <p className="mono mt-0.5 text-[9px] text-white/30">
+                      {g.kind} · {g.confidence}%
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-4 text-[9.5px] leading-relaxed text-white/25">
+                The ghost node is a hypothesis placeholder. It is drawn dashed because nothing in
+                the record confirms it exists. Treat its edges as questions, never as facts.
+              </p>
+            </div>
+          )}
+
+          {approved && approved.length > 0 && (
+            <div className="border-t border-white/8 px-3 py-3">
+              <p className="mono text-[9px] tracking-[0.2em] text-[#22C55E] uppercase">
+                Approved from collection
+              </p>
+              <p className="mono mt-1 text-[9.5px] text-white/35">
+                {approved.length} entities ·{" "}
+                {new Set(approved.map(a => a.entityType)).size} types
+              </p>
+              <p className="mt-1.5 text-[9.5px] leading-relaxed text-white/25">
+                These have no recorded relationship yet, so they are not drawn — placing them would
+                invent a connection.
+              </p>
+            </div>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
 
-/* ---------- small helpers / bits ---------- */
+/* ==================================================================== *
+ * Small pieces
+ * ==================================================================== */
 
-function Sliders({ className }: { className?: string }) {
+function Section({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count: number;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
   return (
-    <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <path
-        d="M4 6h16M4 12h16M4 18h16"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-      <circle cx="9" cy="6" r="2" fill="#0B0F1A" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="15" cy="12" r="2" fill="#0B0F1A" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="8" cy="18" r="2" fill="#0B0F1A" stroke="currentColor" strokeWidth="1.6" />
-    </svg>
-  );
-}
-
-function SpiralRings({ rings }: { rings: SpiralGuide[] }) {
-  return (
-    <>
-      {rings.map((r, i) => (
-        <circle
-          key={i}
-          cx={0}
-          cy={0}
-          r={r.r}
-          fill="none"
-          stroke="rgba(167,139,250,0.16)"
-          strokeWidth={1 / (rings[rings.length - 1]?.r || 1)}
-          vectorEffect="non-scaling-stroke"
-          strokeDasharray="4 8"
+    <div className="py-1">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-white/3"
+      >
+        <ChevronDown
+          className={`h-3 w-3 text-white/30 transition-transform ${open ? "" : "-rotate-90"}`}
         />
-      ))}
-    </>
+        <span className="text-[11px] font-semibold text-white/70">{title}</span>
+        <span className="mono ml-auto text-[9px] text-white/30">({count})</span>
+      </button>
+      {open && <div className="pb-1">{children}</div>}
+    </div>
   );
 }
+
+function Toggle({
+  label,
+  n,
+  on,
+  set,
+  dot,
+  accent,
+  onToggleLocked,
+}: {
+  label: string;
+  n: number;
+  on: boolean;
+  set?: (v: boolean) => void;
+  dot?: string;
+  accent?: string;
+  onToggleLocked?: boolean;
+}) {
+  return (
+    <button
+      onClick={() => set?.(!on)}
+      disabled={onToggleLocked}
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition enabled:hover:bg-white/4 disabled:cursor-default"
+    >
+      <span
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ background: dot ?? accent ?? "#4B5563" }}
+      />
+      <span className="mono flex-1 truncate text-[10px] text-white/55">{label}</span>
+      <span className="mono text-[9px] text-white/25">{n}</span>
+      {onToggleLocked ? (
+        <Eye className="h-3 w-3 text-white/20" />
+      ) : on ? (
+        <Eye className="h-3 w-3 text-[#22D3EE]" />
+      ) : (
+        <EyeOff className="h-3 w-3 text-white/20" />
+      )}
+    </button>
+  );
+}
+
+function Explanation({ id, anomalies }: { id: string; anomalies: Anomaly[] }) {
+  const hit = anomalies.find(a => a.id === id);
+  if (!hit) return null;
+  return (
+    <p className="mt-2 border-t border-white/8 pt-2 text-[10px] leading-relaxed text-white/45">
+      {hit.note}
+    </p>
+  );
+}
+
+/** Entities that appear in more than one FIR — computed, not hard-coded. */
+function crossCase() {
+  return NODES.filter(n => n.kind === "entity" && n.caseIds.length > 1)
+    .map(n => ({ id: n.id, label: n.label, cases: n.caseIds.length }))
+    .sort((a, b) => b.cases - a.cases);
+}
+

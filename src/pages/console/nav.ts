@@ -6,9 +6,13 @@ import {
   FileText,
   FolderOpen,
   GitBranch,
+  Inbox,
   LayoutDashboard,
   Map,
+  MessagesSquare,
   Radar,
+  ScanText,
+  ScrollText,
   Search,
   Share2,
   Terminal,
@@ -20,15 +24,22 @@ export interface NavItem {
   label: string;
   path: string;
   icon: LucideIcon;
-  group: "core" | "intel";
+  group: "modules" | "core" | "intel";
 }
 
 /** Sidebar destinations — investigation details the console leads to. */
 export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", path: "/console", icon: LayoutDashboard, group: "core" },
+
+  /* ---- the five-module investigative workflow ---- */
+  { label: "Collection", path: "/console/collection", icon: Inbox, group: "modules" },
+  { label: "Extraction", path: "/console/extraction", icon: ScanText, group: "modules" },
+  { label: "Network", path: "/console/network", icon: Share2, group: "modules" },
+  { label: "Assistant", path: "/console/assistant", icon: MessagesSquare, group: "modules" },
+  { label: "Case File", path: "/console/case-file", icon: ScrollText, group: "modules" },
+
   { label: "Cases", path: "/console/cases", icon: FolderOpen, group: "core" },
   { label: "Case Search", path: "/console/search", icon: Search, group: "core" },
-  { label: "Network", path: "/console/network", icon: Share2, group: "core" },
   { label: "AI Analysis", path: "/console/ghost", icon: Radar, group: "core" },
   { label: "Neural Engine", path: "/console/neural", icon: BrainCircuit, group: "core" },
   { label: "Terminal", path: "/console/terminal", icon: Terminal, group: "core" },

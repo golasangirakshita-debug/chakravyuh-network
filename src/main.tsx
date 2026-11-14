@@ -20,6 +20,10 @@ const ConsoleLayout = lazy(() => import("./pages/console/ConsoleLayout.tsx"));
 const DashboardPage = lazy(() => import("./pages/console/Dashboard.tsx"));
 const CasesPage = lazy(() => import("./pages/console/Cases.tsx"));
 const NetworkPage = lazy(() => import("./pages/console/Network.tsx"));
+const CollectionPage = lazy(() => import("./pages/console/Collection.tsx"));
+const ExtractionPage = lazy(() => import("./pages/console/Extraction.tsx"));
+const AssistantPage = lazy(() => import("./pages/console/Assistant.tsx"));
+const CaseFilePage = lazy(() => import("./pages/console/CaseFile.tsx"));
 const EvidencePage = lazy(() => import("./pages/console/Evidence.tsx"));
 const GhostPage = lazy(() => import("./pages/console/Ghost.tsx"));
 const NeuralPage = lazy(() => import("./pages/console/Neural.tsx"));
@@ -165,6 +169,10 @@ createRoot(document.getElementById("root")!).render(
                     <Route index element={<DashboardPage />} />
                     <Route path="cases" element={<CasesPage />} />
                     <Route path="network" element={<NetworkPage />} />
+                    <Route path="collection" element={<CollectionPage />} />
+                    <Route path="extraction" element={<ExtractionPage />} />
+                    <Route path="assistant" element={<AssistantPage />} />
+                    <Route path="case-file" element={<CaseFilePage />} />
                     <Route path="evidence" element={<EvidencePage />} />
                     <Route path="ghost" element={<GhostPage />} />
                     <Route path="neural" element={<NeuralPage />} />
